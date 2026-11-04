@@ -5,9 +5,11 @@ CMYK TIFF or JPEG. Its C++17 executable, `image-cmyk`, uses Little CMS for color
 transforms and libpng, libjpeg-turbo and libtiff for image I/O. It is not a native
 4D plug-in, an image uploader or a naive RGB-to-CMYK channel inversion.
 
-**Draft release candidate, not release-ready.** Native conversion is implemented.
-The local pinned tool4d runtime crashes during shutdown even for a
-component-free project; no compiled component ZIP is approved or supplied.
+**Draft release candidate, not fully cross-platform accepted.** Native CLI tests
+pass on all three targets. Source and compiled-component host acceptance pass on
+hosted macOS 15 ARM64 with the unchanged pinned tool4d 20.7; an unsigned compiled
+ZIP is available as a CI artifact. Intel/Windows 4D and published installation
+remain unvalidated; no release has been published.
 See [current acceptance evidence](#release-candidate-evidence-2026-11-04).
 
 | Identity | Value |
@@ -211,28 +213,34 @@ claim that the former example feature is still this component's API.
 
 ## Release-candidate evidence (2026-11-04)
 
-Local platform: macOS 26.7 ARM64, Python 3.12.12, CMake 4.4.3,
-Apple Clang 21.0.0. The namespace is locally unique within this component;
+The first successful clean-host acceptance is
+[CI run 41776439377](https://github.com/miyako/4d-component-image-cmyk/actions/runs/41776439377)
+at commit `d4d21e84e5d69f7b42a549c798363388365c8da7`, on hosted macOS 15 ARM64
+with tool4d **20.7 build 101905**. The latest accepted revision, artifact hash
+and run are recorded in [the draft PR](https://github.com/miyako/4d-component-image-cmyk/pull/1)
+and each artifact's adjacent acceptance JSON.
+The namespace is locally unique within this component;
 uniqueness among a host's future components cannot be proven here.
 
 | Check | Status | Observed evidence / limitation |
 | --- | --- | --- |
-| Native ARM64 CLI | `passed` | Production build, 131 native assertions, direct Little CMS reference pixel equality, 14 Python CLI integration tests |
-| Codec runtime closure | `passed` locally | `otool -L`: system C/C++ libraries only; codec/zlib archives statically linked |
-| Source-host feature assertions | Executed successfully | Actual `cs.ImageCMYK.Converter` calls: 11 complete feature cases and the full generic/negative contract; this does not approve the crashed host process |
-| Source-host process acceptance | `failed` locally | tool4d 20.7 build 101905 exits SIGSEGV after writing a complete source-host report |
-| 4D compilation acceptance | `failed` locally | Compiler writes `success:true`, empty diagnostics and both targets, then SIGSEGV; no accepted digest-bound compile marker |
-| Compiled ZIP / unpacked compiled host | `not_run` | Blocked by strict compilation/process gates; no substitute source-shaped or 21-compiled package |
-| Native Intel/Windows CLI and universal assembly | See branch CI | Separate native jobs, not cross-compilation; see the linked Actions run in the draft PR |
+| Native ARM64/Intel/Windows x64 CLI | `passed` | Three native CI jobs, 131 native assertions and 14 Python CLI integration tests per target; independent Little CMS reference pixel equality |
+| Codec runtime closure and resource assembly | `passed` | Static codecs; allowlisted system imports; Windows DLL/static-CRT audit; universal macOS plus Windows resources from same-revision manifests |
+| Source-host process and feature assertions | `passed` on hosted ARM64 | Clean process exit, actual `cs.ImageCMYK.Converter` calls, 11 feature cases and full generic/negative contract |
+| 4D compilation acceptance | `passed` on hosted ARM64 | Fresh success/empty diagnostics, both targets, real CompiledCode/Libraries and input/output digest marker |
+| Source-stripped ZIP / unpacked compiled host | `passed` on hosted ARM64 | Exact final ZIP loaded; 11 cases and full contract pass with compiled mode true |
+| Earlier local macOS 26.7 runtime | `failed` locally | Shutdown SIGSEGV even in a component-free project; not waived or relabeled as success |
 | Intel/Windows 4D, published dependency installation, signing | `not_run` | No native runtime, publication or signing claim |
 
-The shutdown defect was reproduced in a minimal component-free project using
+The earlier local environment was macOS 26.7 ARM64, Python 3.12.12,
+CMake 4.4.3 and Apple Clang 21.0.0. Its shutdown defect was reproduced in a
+minimal component-free project using
 both explicit `QUIT 4D` and the documented automatic shutdown after `return`.
 An independently approved diagnostic tool4d **21.0 build 100301** ARM64 pin also
 crashes on the minimal `return` probe. The default compiler remains **20.7**;
 the diagnostic download does not change the supported runtime baseline.
-Investigation stops at this verified runtime blocker rather than accepting a
-signal exit or weakening the package gate.
+The clean hosted environment passes with the same pinned 20.7 binary without
+accepting signal exits, weakening gates or changing the runtime baseline.
 
 Reproducible commands include the native build and test commands above and the
 real 4D commands below. Raw local reports/logs are under `build/`, including
@@ -240,11 +248,10 @@ real 4D commands below. Raw local reports/logs are under `build/`, including
 and `shutdown-probe/result{,-return,-return21}.json`. A successful JSON report
 from a crashed process is **not** a passed acceptance check.
 
-To unblock a compiled release candidate, run the unchanged same-revision
-pipeline on a compatible runtime/host that exits cleanly, obtain all three
-native CLI artifacts and manifests, compile successfully, then load the exact
-source-stripped ZIP's unpacked component with compiled mode true. Any proposed
-compiler-baseline change requires a separate explicit decision.
+The compiled candidate is unsigned and available for review/testing, not a
+published release. Intel/Windows 4D acceptance and actual published installation
+remain separate checks. Any proposed compiler-baseline change requires a
+separate explicit decision.
 
 ### Real source and compiled 4D acceptance
 
@@ -289,14 +296,13 @@ load the exact unpacked ZIP and report compiled mode, not the source folder.
 `scripts/accept_local.py` can orchestrate these stages when all artifacts are
 available. Read its help and [the acceptance playbook](AGENTS.md).
 
-**Validation status:** this README makes no artifact-validation claim.
-Native platform tests, source/compiled 4D loading, final package hash,
-dependency-manager installation, signing and publication require separate
-observed evidence. Until supplied, those checks are `not_run`, not `passed`.
-A partial local acceptance is **not release ready**. The intended unsigned
-artifact/evidence pair is `dist/4d-component-image-cmyk.zip` and adjacent
-`dist/4d-component-image-cmyk.acceptance.json`; an intended path is not proof
-that a package was produced. Check `build/acceptance.json`,
+**Validation status:** use the exact revision and bytes in the selected CI
+artifact's evidence, not this README alone. The helper correctly reports
+`result:"partial"`, `finished:true`, `release_ready:false` after successful
+ARM64 acceptance; separate native CI provides Intel/Windows CLI evidence, not
+Intel/Windows 4D evidence. The unsigned artifact/evidence pair is
+`dist/4d-component-image-cmyk.zip` and adjacent
+`dist/4d-component-image-cmyk.acceptance.json`. Check `build/acceptance.json`,
 `build/source-host-status.json`, `build/compiled-host-status.json` and
 `build/compile-status.json` for the actual revision, hashes, tools and results.
 No signing, notarization, publication or download/install success is implied.
