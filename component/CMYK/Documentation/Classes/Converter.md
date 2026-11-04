@@ -1,6 +1,6 @@
 # Converter
 
-`cs.ImageCMYK.Converter.new({target : Text})` wraps the bundled `image-cmyk`
+`cs.CMYK.Converter.new({target : Text})` wraps the bundled `image-cmyk`
 executable. Within the component the class is `cs.Converter`. `target` may be
 omitted on macOS, or be `"macOS-universal"`. Windows requires `"Windows-x64"`;
 native Windows ARM64 is unsupported.
@@ -55,7 +55,7 @@ it is **not** a characterized press profile and makes no printing-quality claim.
 Use a licensed output profile appropriate to the actual print process.
 
 ```4d
-var $tool : cs.ImageCMYK.Converter
+var $tool : cs.CMYK.Converter
 var $target : Text
 var $source; $destination; $icc : 4D.File
 var $result : Object
@@ -63,7 +63,7 @@ $target:="macOS-universal"
 If (Is Windows)
   $target:="Windows-x64"
 End if
-$tool:=cs.ImageCMYK.Converter.new($target)
+$tool:=cs.CMYK.Converter.new($target)
 $source:=Folder(fk desktop folder).file("input.png")
 $destination:=Folder(fk desktop folder).file("output-cmyk.tif")
 $icc:=Folder(fk desktop folder).file("printer.icc")

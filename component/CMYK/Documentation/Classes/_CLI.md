@@ -1,7 +1,7 @@
 # _CLI (internal convention)
 
 `cs._CLI.new(executableName : Text; target : Text)` is the reusable bundled
-executable resolver. The host can technically access `cs.ImageCMYK._CLI`;
+executable resolver. The host can technically access `cs.CMYK._CLI`;
 underscore naming is not true private access in 4D.
 
 `execute(arguments : Collection) : Object` selects `/RESOURCES/bin/macOS/<name>`

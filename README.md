@@ -15,7 +15,7 @@ See [current acceptance evidence](#release-candidate-evidence-2026-11-04).
 | Identity | Value |
 | --- | --- |
 | Repository / component / package | `miyako/CMYK` / `CMYK` |
-| Host namespace / class | `cs.ImageCMYK.Converter` |
+| Host namespace / class | `cs.CMYK.Converter` |
 | CLI / version / protocol | `image-cmyk` / `0.1.0` / `1` |
 | Implementation | C++17, CMake; statically built image/color dependencies |
 | Native targets | macOS x86_64, macOS arm64, Windows x64 |
@@ -30,10 +30,10 @@ See the full [Converter contract](component/CMYK/Documentation/Classes/Converter
 and generic [_CLI](component/CMYK/Documentation/Classes/_CLI.md)
 and [_Process](component/CMYK/Documentation/Classes/_Process.md)
 contracts. Component-internal code uses `cs.Converter`; host code uses the
-independent `ImageCMYK` namespace.
+`CMYK` namespace.
 
 ```4d
-var $tool : cs.ImageCMYK.Converter
+var $tool : cs.CMYK.Converter
 var $source; $destination; $profile : 4D.File
 var $result; $options : Object
 var $target : Text
@@ -41,7 +41,7 @@ $target:="macOS-universal"
 If (Is Windows)
   $target:="Windows-x64"
 End if
-$tool:=cs.ImageCMYK.Converter.new($target)
+$tool:=cs.CMYK.Converter.new($target)
 $source:=Folder(fk desktop folder).file("tagged-input.png")
 $destination:=Folder(fk desktop folder).file("output-cmyk.tif")
 $profile:=Folder(fk desktop folder).file("printer.icc")
@@ -219,9 +219,11 @@ at commit `d4d21e84e5d69f7b42a549c798363388365c8da7`, on hosted macOS 15 ARM64
 with tool4d **20.7 build 101905**. Those historical artifacts do not validate the
 renamed `CMYK` package. The latest accepted `CMYK` revision, artifact hash and run
 are recorded in [the follow-up pull request](https://github.com/miyako/CMYK/pulls)
-and each new artifact's adjacent acceptance JSON. The migration preserves
-namespace `ImageCMYK`, class `Converter`, CLI `image-cmyk` and the existing catalog
-UUID; only the repository/component/package identity changes.
+and each new artifact's adjacent acceptance JSON. Before the first public release,
+the host namespace was also changed from `ImageCMYK` to `CMYK`: use
+`cs.CMYK.Converter` in host declarations and constructor calls. There is no legacy
+namespace alias. Class `Converter`, CLI `image-cmyk` and the existing catalog UUID
+remain unchanged. Earlier artifacts do not validate the new namespace.
 The namespace is locally unique within this component;
 uniqueness among a host's future components cannot be proven here.
 
@@ -229,7 +231,7 @@ uniqueness among a host's future components cannot be proven here.
 | --- | --- | --- |
 | Native ARM64/Intel/Windows x64 CLI | `passed` | Three native CI jobs, 131 native assertions and 14 Python CLI integration tests per target; independent Little CMS reference pixel equality |
 | Codec runtime closure and resource assembly | `passed` | Static codecs; allowlisted system imports; Windows DLL/static-CRT audit; universal macOS plus Windows resources from same-revision manifests |
-| Source-host process and feature assertions | `passed` on hosted ARM64 | Clean process exit, actual `cs.ImageCMYK.Converter` calls, 11 feature cases and full generic/negative contract |
+| Source-host process and feature assertions | `passed` on hosted ARM64 | Clean process exit, actual `cs.CMYK.Converter` calls, 11 feature cases and full generic/negative contract |
 | 4D compilation acceptance | `passed` on hosted ARM64 | Fresh success/empty diagnostics, both targets, real CompiledCode/Libraries and input/output digest marker |
 | Source-stripped ZIP / unpacked compiled host | `passed` on hosted ARM64 | Exact final ZIP loaded; 11 cases and full contract pass with compiled mode true |
 | Earlier local macOS 26.7 runtime | `failed` locally | Shutdown SIGSEGV even in a component-free project; not waived or relabeled as success |
@@ -263,7 +265,7 @@ For an isolated hosted attempt without changing repository variables, dispatch
 `accept_4d`. From the CLI:
 
 ```sh
-gh workflow run ci.yml --ref rename-cmyk-identity -f accept_4d=true
+gh workflow run ci.yml --ref use-cmyk-namespace -f accept_4d=true
 ```
 
 This rebuilds all three native targets at the selected commit, then runs the
