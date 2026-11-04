@@ -2,7 +2,6 @@
 """Publish only an explicitly tagged, accepted unsigned experimental prerelease."""
 import argparse
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -61,9 +60,6 @@ def write_native_evidence(root):
             raise ValueError("native execution evidence is required: " + target)
         targets[target] = manifest
     result = {"schema": 1, "commit": commit(root), "source_sha256": source_digest(root),
-              "run_url": os.environ.get("GITHUB_SERVER_URL", "https://github.com") + "/"
-                         + os.environ.get("GITHUB_REPOSITORY", "") + "/actions/runs/"
-                         + os.environ.get("GITHUB_RUN_ID", ""),
               "targets": targets}
     output = root / "dist" / (config["repository"] + ".native-evidence.json")
     if any(path.is_symlink() for path in [output, *output.parents]):
