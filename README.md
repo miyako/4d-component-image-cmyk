@@ -5,6 +5,11 @@ CMYK TIFF or JPEG. Its C++17 executable, `image-cmyk`, uses Little CMS for color
 transforms and libpng, libjpeg-turbo and libtiff for image I/O. It is not a native
 4D plug-in, an image uploader or a naive RGB-to-CMYK channel inversion.
 
+**Draft release candidate, not release-ready.** Native conversion is implemented.
+The local pinned tool4d runtime crashes during shutdown even for a
+component-free project; no compiled component ZIP is approved or supplied.
+See [current acceptance evidence](#release-candidate-evidence-2026-11-04).
+
 | Identity | Value |
 | --- | --- |
 | Repository / component / package | `miyako/4d-component-image-cmyk` / `4d-component-image-cmyk` |
@@ -203,6 +208,43 @@ selected C++ executable. `TEST_CLI_LANGUAGE=none` explicitly skips native CLI
 execution for infrastructure-only checks; a skip is **not** feature acceptance.
 The retained infrastructure suites validate packaging/process tooling, not a
 claim that the former example feature is still this component's API.
+
+## Release-candidate evidence (2026-11-04)
+
+Local platform: macOS 26.7 ARM64, Python 3.12.12, CMake 4.4.3,
+Apple Clang 21.0.0. The namespace is locally unique within this component;
+uniqueness among a host's future components cannot be proven here.
+
+| Check | Status | Observed evidence / limitation |
+| --- | --- | --- |
+| Native ARM64 CLI | `passed` | Production build, 131 native assertions, direct Little CMS reference pixel equality, 14 Python CLI integration tests |
+| Codec runtime closure | `passed` locally | `otool -L`: system C/C++ libraries only; codec/zlib archives statically linked |
+| Source-host feature assertions | Executed successfully | Actual `cs.ImageCMYK.Converter` calls: 11 complete feature cases and the full generic/negative contract; this does not approve the crashed host process |
+| Source-host process acceptance | `failed` locally | tool4d 20.7 build 101905 exits SIGSEGV after writing a complete source-host report |
+| 4D compilation acceptance | `failed` locally | Compiler writes `success:true`, empty diagnostics and both targets, then SIGSEGV; no accepted digest-bound compile marker |
+| Compiled ZIP / unpacked compiled host | `not_run` | Blocked by strict compilation/process gates; no substitute source-shaped or 21-compiled package |
+| Native Intel/Windows CLI and universal assembly | See branch CI | Separate native jobs, not cross-compilation; see the linked Actions run in the draft PR |
+| Intel/Windows 4D, published dependency installation, signing | `not_run` | No native runtime, publication or signing claim |
+
+The shutdown defect was reproduced in a minimal component-free project using
+both explicit `QUIT 4D` and the documented automatic shutdown after `return`.
+An independently approved diagnostic tool4d **21.0 build 100301** ARM64 pin also
+crashes on the minimal `return` probe. The default compiler remains **20.7**;
+the diagnostic download does not change the supported runtime baseline.
+Investigation stops at this verified runtime blocker rather than accepting a
+signal exit or weakening the package gate.
+
+Reproducible commands include the native build and test commands above and the
+real 4D commands below. Raw local reports/logs are under `build/`, including
+`host-status.json`, `compile-status.json`, `source-host.log`, `compile.log`,
+and `shutdown-probe/result{,-return,-return21}.json`. A successful JSON report
+from a crashed process is **not** a passed acceptance check.
+
+To unblock a compiled release candidate, run the unchanged same-revision
+pipeline on a compatible runtime/host that exits cleanly, obtain all three
+native CLI artifacts and manifests, compile successfully, then load the exact
+source-stripped ZIP's unpacked component with compiled mode true. Any proposed
+compiler-baseline change requires a separate explicit decision.
 
 ### Real source and compiled 4D acceptance
 

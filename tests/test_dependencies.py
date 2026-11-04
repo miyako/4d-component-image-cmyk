@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path, PureWindowsPath
 import sys
 import tarfile
+import urllib.error
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -31,9 +32,10 @@ class DependencyTests(unittest.TestCase):
         (root / "cli").mkdir()
         cache = root / "build/dependency-sources"
         cache.mkdir(parents=True)
-        (cache / "example.archive").write_bytes(data.getvalue())
+        digest = hashlib.sha256(data.getvalue()).hexdigest()
+        (cache / ("example-" + digest + ".archive")).write_bytes(data.getvalue())
         (root / "cli/dependencies.json").write_text(json.dumps({"dependencies": [
-            {"name": "example", "sha256": hashlib.sha256(data.getvalue()).hexdigest()}]}))
+            {"name": "example", "sha256": digest}]}))
 
     def test_pins_and_distributed_notices(self):
         lock = json.loads((ROOT / "cli/dependencies.json").read_text())
@@ -114,7 +116,7 @@ class DependencyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix=".dependency-test-", dir=ROOT) as temporary:
             root = Path(temporary)
             self.cached_archive(root)
-            (root / "build/dependency-sources/example.archive").write_bytes(b"changed")
+            next((root / "build/dependency-sources").glob("*.archive")).write_bytes(b"changed")
             with self.assertRaisesRegex(ValueError, "checksum mismatch"):
                 build_dependencies.sources(root)
 
@@ -146,3 +148,26 @@ class DependencyTests(unittest.TestCase):
                     else:
                         with self.assertRaisesRegex(ValueError, "unreviewed Windows DLL"):
                             audit_native_dependencies("image-cmyk.exe", "windows-x64", root / "cl.exe")
+
+    def test_transient_download_retries_same_pin_only(self):
+        dependency = {"name": "example", "url": "https://example.test/fixed"}
+        response = io.BytesIO(b"archive")
+        response.geturl = lambda: dependency["url"]
+        transient = urllib.error.HTTPError(dependency["url"], 502, "Bad Gateway", {}, None)
+        with tempfile.TemporaryDirectory(prefix=".dependency-test-", dir=ROOT) as temporary, \
+                patch("build_dependencies.urllib.request.urlopen",
+                      side_effect=[transient, response]) as request, \
+                patch("build_dependencies.time.sleep"):
+            output = Path(temporary) / "download"
+            build_dependencies.download_archive(dependency, output)
+            self.assertEqual(output.read_bytes(), b"archive")
+            self.assertEqual([call.args for call in request.call_args_list],
+                             [(dependency["url"],), (dependency["url"],)])
+
+    def test_permanent_download_error_is_not_retried(self):
+        dependency = {"name": "example", "url": "https://example.test/fixed"}
+        forbidden = urllib.error.HTTPError(dependency["url"], 403, "Forbidden", {}, None)
+        with patch("build_dependencies.urllib.request.urlopen", side_effect=forbidden) as request:
+            with self.assertRaisesRegex(ValueError, "example source download failed: HTTP 403"):
+                build_dependencies.download_archive(dependency, Path("unused"))
+            self.assertEqual(request.call_count, 1)

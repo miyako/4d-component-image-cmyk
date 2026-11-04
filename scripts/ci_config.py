@@ -201,7 +201,8 @@ def resolve_tool_pin(root=ROOT, *, url=None, digest=None):
 
 def checked_tool_pin(url, digest):
     parsed = urllib.parse.urlsplit(url)
-    if (parsed.scheme != "https" or parsed.hostname != "resources-download.4d.com"
+    if (parsed.scheme != "https"
+            or parsed.hostname not in {"resources-download.4d.com", "product-download.4d.com"}
             or parsed.username or parsed.password or parsed.query or parsed.fragment
             or not re.fullmatch(r"[0-9a-fA-F]{64}", digest)):
         raise ValueError("official HTTPS tool4d URL and 64-hex SHA256 are required")
@@ -214,7 +215,7 @@ def checked_tool_pin(url, digest):
 def checked_tool_origin(url):
     parsed = urllib.parse.urlsplit(url)
     if (parsed.scheme != "https"
-            or parsed.hostname not in {"resources-download.4d.com", "builds2.4d.com"}
+            or parsed.hostname not in {"resources-download.4d.com", "product-download.4d.com", "builds2.4d.com"}
             or parsed.port not in (None, 443) or parsed.username or parsed.password
             or parsed.fragment):
         raise ValueError("tool4D download redirected outside approved official HTTPS origins")

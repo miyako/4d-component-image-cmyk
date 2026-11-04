@@ -7,6 +7,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import tarfile
+import time
+import urllib.error
 import urllib.request
 
 
@@ -40,6 +42,24 @@ def static_inventory(prefix):
         link = str(path.readlink()).encode() + b"\0" if path.is_symlink() else b""
         result[path.relative_to(prefix).as_posix()] = hashlib.sha256(link + path.read_bytes()).hexdigest()
     return result
+
+
+def download_archive(dependency, partial):
+    transient = {429, 500, 502, 503, 504}
+    for attempt in range(3):
+        try:
+            print("Downloading pinned source: " + dependency["name"], flush=True)
+            with urllib.request.urlopen(dependency["url"], timeout=120) as response:
+                if not response.geturl().startswith("https://"):
+                    raise ValueError("dependency redirect must remain HTTPS")
+                with partial.open("wb") as output:
+                    shutil.copyfileobj(response, output)
+            return
+        except urllib.error.HTTPError as error:
+            if error.code not in transient or attempt == 2:
+                raise ValueError(f"{dependency['name']} source download failed: HTTP {error.code}") from error
+            print(f"{dependency['name']} transient HTTP {error.code}; retrying pinned URL", flush=True)
+            time.sleep(attempt + 1)
 
 
 def notices(root, source, write=False):
@@ -77,17 +97,13 @@ def sources(root):
     cache.mkdir(parents=True, exist_ok=True)
     result = {}
     for dependency in lock["dependencies"]:
-        archive = cache / (dependency["name"] + ".archive")
+        archive = cache / (dependency["name"] + "-" + dependency["sha256"] + ".archive")
         regular_path(archive)
         if not archive.exists():
             partial = archive.with_suffix(".partial")
             regular_path(partial)
             try:
-                with urllib.request.urlopen(dependency["url"], timeout=120) as response:
-                    if not response.geturl().startswith("https://"):
-                        raise ValueError("dependency redirect must remain HTTPS")
-                    with partial.open("wb") as output:
-                        shutil.copyfileobj(response, output)
+                download_archive(dependency, partial)
                 partial.replace(archive)
             finally:
                 partial.unlink(missing_ok=True)

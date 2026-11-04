@@ -68,9 +68,18 @@ The unchanged tool4d 20.7 build 101905 archive pin is in `package.json.tool`.
 As observed on November 4, 2026, the official
 `https://resources-download.4d.com/` endpoint redirects to the vendor CDN
 `https://builds2.4d.com/`. This generated repository explicitly permits these
-two exact HTTPS hostnames on **every** redirect hop, with no arbitrary suffix
+exact HTTPS hostnames on **every** redirect hop, with no arbitrary suffix
 matching, credentials or nonstandard ports. Authentication/cookies are not
 forwarded, signed redirect query strings are not saved to installation
 metadata, and the complete archive must still match the original pinned
 SHA-256 before safe extraction. This does not change the original template
 repository or authorize a different compiler build.
+
+An explicitly approved **diagnostic-only** override also permits the exact
+vendor host `product-download.4d.com`. The approved tool4d 21.0 build 100301
+ARM64 archive SHA-256 is
+`e15500e59ead66abab6f8c592643bd2e648429aaa0df5b700bd898e2f6043b8b`,
+independently published in the vendor's
+[immutable Homebrew cask](https://github.com/4d/homebrew-tap/blob/df1666e7a3bd4342abfee2ae0189d223b4de05f4/Casks/tool4d.rb).
+It does not replace the default 20.7 pin, establish 20-compatible compiled
+output, or authorize a published runtime-baseline change.
