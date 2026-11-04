@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish verified signed experimental assets, never an unsigned/stable fallback."""
+"""Publish verified signed CMYK assets with an explicit SemVer release channel."""
 import argparse
 import json
 from pathlib import Path
@@ -12,6 +12,7 @@ import uuid
 from build_provenance import commit, sha256, source_digest, verify
 from ci_config import ROOT, TARGETS, load_config
 from release_ref import validate_tag, verify as verify_tag
+from bump_release import release_channel
 
 
 NOTES = """Experimental CMYK release candidate: macOS Developer ID signed and Apple notarized.
@@ -56,12 +57,6 @@ CMYK.acceptance.json and CMYK.native-evidence.json deliberately describe the
 pre-sign build/compilation; signing changes native bytes without rewriting those
 original compiler markers or manifests. Unsigned rc1 is preserved separately.
 """
-
-
-def require_prerelease(tag):
-    validate_tag(tag)
-    if "-" not in tag[1:].split("+", 1)[0]:
-        raise ValueError("this experimental workflow only publishes prerelease SemVer tags")
 
 
 def write_native_evidence(root):
@@ -144,7 +139,7 @@ def presign_assets(root, expected_sha):
 
 
 def publication_assets(root, tag, expected_sha, *, tag_required=True):
-    require_prerelease(tag)
+    release_channel(tag)
     root = Path(root).resolve()
     config = load_config(root, initialized=True, tag=tag)
     if tag_required:
@@ -256,13 +251,15 @@ def verify_uploaded_assets(root, tag, assets):
                 raise ValueError("uploaded draft asset differs from validated local bytes: " + asset.name)
 
 
-def release_metadata(root, tag):
+def release_metadata(root, tag, *, required=True):
     # The by-tag endpoint excludes drafts, even when the caller can list them.
     result = subprocess.run(["gh", "api", "repos/{owner}/{repo}/releases?per_page=100",
                              "--paginate", "--slurp"],
                             cwd=root, check=True, capture_output=True, text=True)
     matching = [release for page in json.loads(result.stdout) for release in page
                 if release.get("tag_name") == tag]
+    if not matching and not required:
+        return None
     if len(matching) != 1:
         raise ValueError("exactly one owned draft or published release must match the tag")
     return matching[0]
@@ -270,22 +267,60 @@ def release_metadata(root, tag):
 
 def publish(root, tag, expected_sha):
     assets = publication_assets(root, tag, expected_sha)
-    subprocess.run(["gh", "release", "create", tag, *(str(path) for path in assets),
-                    "--verify-tag", "--draft", "--prerelease", "--latest=false",
-                    "--title", "CMYK " + tag + " (signed macOS experimental)",
-                    "--notes", NOTES], cwd=root, check=True)
+    channel = release_channel(tag)
+    marker = "\n\nVerified release source: " + expected_sha + "\n" + "\n".join(
+        path.name + " SHA256: " + sha256(path) for path in assets)
+    notes = NOTES if channel["prerelease"] else NOTES.replace(
+        "Experimental CMYK release candidate:", "CMYK release:", 1)
+    existing = release_metadata(root, tag, required=False)
+    if existing is None:
+        subprocess.run(["gh", "release", "create", tag, *(str(path) for path in assets),
+                        "--verify-tag", "--draft",
+                        "--prerelease" if channel["prerelease"] else "--prerelease=false",
+                        "--latest=false", "--title", "CMYK " + tag + " (signed macOS)",
+                        "--notes", notes + marker], cwd=root, check=True)
+    else:
+        if (existing.get("prerelease") is not channel["prerelease"]
+                or not isinstance(existing.get("body"), str) or not existing["body"].endswith(marker)):
+            raise ValueError("existing release does not match this exact source, channel and asset hashes")
+        if existing.get("draft") is True:
+            names = [entry["name"] for entry in existing["assets"]]
+            if len(names) != len(set(names)):
+                raise ValueError("duplicate draft asset names")
+            verify_uploaded_assets(root, tag, [path for path in assets if path.name in names])
+            for path in assets:
+                if path.name not in names:
+                    subprocess.run(["gh", "release", "upload", tag, str(path)], cwd=root, check=True)
+        elif existing.get("draft") is False:
+            pass
+        else:
+            raise ValueError("existing release has invalid draft status")
     verify_uploaded_assets(root, tag, assets)
     subprocess.run(["git", "fetch", "--force", "--no-tags", "origin",
                     "+refs/tags/" + tag + ":refs/tags/" + tag], cwd=root, check=True)
     verify_tag(root, tag, expected_sha)
     draft = release_metadata(root, tag)
-    if draft.get("draft") is not True or draft.get("prerelease") is not True:
-        raise ValueError("release must remain a draft prerelease until uploaded-byte verification")
-    subprocess.run(["gh", "release", "edit", tag, "--draft=false",
-                    "--prerelease", "--latest=false"], cwd=root, check=True)
-    final = release_metadata(root, tag)
-    if final.get("draft") is not False or final.get("prerelease") is not True:
-        raise ValueError("published release is not the authorized public prerelease")
+    if existing is not None and existing.get("draft") is False:
+        final = draft
+    else:
+        if (draft.get("draft") is not True or draft.get("prerelease") is not channel["prerelease"]
+                or type(draft.get("id")) is not int or draft["id"] <= 0):
+            raise ValueError("release must remain an owned draft in the selected channel until verification")
+        subprocess.run(["gh", "api", "--method", "PATCH",
+                        "repos/{owner}/{repo}/releases/" + str(draft["id"]),
+                        "-F", "draft=false", "-F", "prerelease=" + str(channel["prerelease"]).lower(),
+                        "-f", "make_latest=" + str(channel["latest"]).lower()], cwd=root, check=True)
+        final = release_metadata(root, tag)
+    if final.get("draft") is not False or final.get("prerelease") is not channel["prerelease"]:
+        raise ValueError("published release is not in the authorized public channel")
+    if channel["latest"]:
+        latest = subprocess.run(["gh", "api", "repos/{owner}/{repo}/releases/latest"],
+                                cwd=root, check=True, capture_output=True, text=True)
+        if json.loads(latest.stdout).get("tag_name") != tag:
+            raise ValueError("published stable release is not GitHub Latest")
+    if existing is None or existing.get("draft") is True:
+        verify_uploaded_assets(root, tag, assets)
+    return final
 
 
 def main():
@@ -310,7 +345,7 @@ def main():
             else:
                 publish(args.root, args.tag, args.expected_sha)
     except (ValueError, OSError, KeyError, TypeError, subprocess.SubprocessError) as error:
-        parser.exit(1, f"prerelease publication failed: {error}\n")
+        parser.exit(1, f"release publication failed: {error}\n")
 
 
 if __name__ == "__main__":

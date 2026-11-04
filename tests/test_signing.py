@@ -61,23 +61,27 @@ class Fixture(unittest.TestCase):
         return archive
 
 
+TEST_TAG = "v0.1.0-rc.2"
+
+
 class PolicyTests(Fixture):
     def env(self, event="push"):
         return {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": event,
-                "GITHUB_REF": "refs/tags/" + signing.TAG, "GITHUB_SHA": SHA,
+                "GITHUB_REF": "refs/tags/" + TEST_TAG, "GITHUB_SHA": SHA,
                 "GITHUB_REPOSITORY": "miyako/CMYK"}
 
     def preflight(self, env, **kwargs):
         def command(label, args, **options):
             if label == "inspect optional preflight tag":
-                return ("refs/tags/" + signing.TAG + "\n").encode(), b""
+                return ("refs/tags/" + TEST_TAG + "\n").encode(), b""
             return (SHA + "\n").encode(), b""
 
         with patch.object(signing, "commit", return_value=SHA), \
                 patch.object(signing, "run", side_effect=command), \
                 patch.object(signing, "load_config", return_value={"repository": "CMYK", "cli": "image-cmyk"}):
-            return signing.preflight(self.root, kwargs.get("tag", signing.TAG),
-                                     kwargs.get("sha", SHA), env, kwargs.get("system", "Darwin"))
+            return signing.preflight(self.root, kwargs.get("tag", TEST_TAG),
+                                     kwargs.get("sha", SHA), env, kwargs.get("system", "Darwin"),
+                                     candidate=kwargs.get("candidate"))
 
     def test_event_allowlist(self):
         self.preflight(self.env())
@@ -97,18 +101,36 @@ class PolicyTests(Fixture):
         with patch.object(signing, "commit", return_value=SHA), \
                 patch.object(signing, "run", return_value=(b"", b"")) as command, \
                 patch.object(signing, "load_config", return_value={"repository": "CMYK", "cli": "image-cmyk"}):
-            signing.preflight(self.root, signing.TAG, SHA, env, "Darwin")
+            signing.preflight(self.root, TEST_TAG, SHA, env, "Darwin")
             self.assertEqual(command.call_count, 1)
             self.assertEqual(command.call_args.args[0], "inspect optional preflight tag")
             env["GITHUB_SHA"] = "d" * 40
             with self.assertRaisesRegex(signing.SigningError, "exact dispatched main SHA"):
-                signing.preflight(self.root, signing.TAG, SHA, env, "Darwin")
+                signing.preflight(self.root, TEST_TAG, SHA, env, "Darwin")
 
     def test_existing_tag_dispatch_may_target_an_older_verified_commit(self):
         env = self.env("workflow_dispatch")
         env["GITHUB_REF"] = "refs/heads/main"
         env["GITHUB_SHA"] = "d" * 40
         self.preflight(env)
+
+    def test_signing_accepts_synchronized_stable_versions_not_a_hardcoded_rc(self):
+        env = self.env()
+        env["GITHUB_REF"] = "refs/tags/v1.2.3"
+        self.preflight(env, tag="v1.2.3")
+
+    def test_untagged_candidate_requires_production_validation_and_matching_tag(self):
+        env = self.env("workflow_dispatch")
+        env["GITHUB_REF"] = "refs/heads/main"
+        directory = self.root / "candidate"
+        with patch("bump_release.validate_candidate", return_value={"tag": TEST_TAG}) as validate:
+            self.preflight(env, candidate=directory)
+            validate.assert_called_once_with(self.root, directory, SHA, production=True)
+        with patch("bump_release.validate_candidate", return_value={"tag": "v9.0.0"}):
+            with self.assertRaises(signing.SigningError):
+                self.preflight(env, candidate=directory)
+        with self.assertRaises(signing.SigningError):
+            self.preflight(self.env(), candidate=directory)
 
     def test_head_tag_platform_and_version(self):
         for args in ({"sha": "c" * 40}, {"sha": "bad"}, {"tag": "v0.1.0-rc.1"}, {"system": "Windows"}):
@@ -121,7 +143,7 @@ class PolicyTests(Fixture):
         with patch.object(signing, "commit", return_value=SHA), \
                 patch.object(signing, "run", return_value=(("d" * 40).encode(), b"")):
             with self.assertRaises(signing.SigningError):
-                signing.preflight(self.root, signing.TAG, SHA, self.env(), "Darwin")
+                signing.preflight(self.root, TEST_TAG, SHA, self.env(), "Darwin")
 
     def test_real_config_version_guard(self):
         # Run the existing configuration validator against a deliberately stale
@@ -131,7 +153,7 @@ class PolicyTests(Fixture):
         self.file("template.json", json.dumps(config).encode())
         self.file("package.json", json.dumps({"name": "CMYK", "version": config["version"]}).encode())
         with self.assertRaisesRegex(ValueError, "tag"):
-            signing.load_config(self.root, tag=signing.TAG)
+            signing.load_config(self.root, tag=TEST_TAG)
 
     def certificate(self, **kwargs):
         return {"sha1": CERT, "ou": [TEAM], "cn": ["Developer ID Application: Example (" + TEAM + ")"],
@@ -790,7 +812,7 @@ class PipelineTests(Fixture):
                 patch.object(signing, "run", side_effect=command), \
                 patch.object(signing, "capture", side_effect=lambda label, args, **kwargs:
                              subprocess.CompletedProcess(args, 0, *command(label, args, **kwargs))):
-            report = signing.production(self.root, tool, signing.TAG, SHA)
+            report = signing.production(self.root, tool, TEST_TAG, SHA)
         self.assertTrue(report["finished"])
         self.assertEqual(report["result"], "partial")
         self.assertFalse(report["release_ready"])
@@ -829,7 +851,7 @@ class PipelineTests(Fixture):
         self.file("dist/CMYK.dmg", b"stale signed artifact")
         with patch.object(signing, "preflight", side_effect=ValueError("PRIVATE-secret")):
             with self.assertRaises(signing.SigningError) as error:
-                signing.production(self.root, self.root / "tool", signing.TAG, SHA)
+                signing.production(self.root, self.root / "tool", TEST_TAG, SHA)
         report = json.loads((self.root / "dist/CMYK.signing.json").read_text())
         self.assertFalse(report["finished"])
         self.assertEqual(report["result"], "failed")

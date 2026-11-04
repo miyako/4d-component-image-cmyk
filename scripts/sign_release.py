@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed CI-only Developer ID signing of the accepted CMYK rc.2 derivative.
+"""Fail-closed CI-only Developer ID signing of an accepted CMYK derivative.
 
 The original compiler outputs and unsigned evidence are never rewritten. Only
 the two external Mach-O code objects are signed; the nested .4DZ is opaque.
@@ -33,7 +33,6 @@ from package_component import validate_compile, write_zip
 from publish_prerelease import presign_assets
 
 
-TAG = "v0.1.0-rc.2"
 CODE = {"Resources/bin/macOS/image-cmyk": {"arm64", "x86_64"},
         "Libraries/lib4d-arm64.dylib": {"arm64"}}
 MAGIC = {b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf",
@@ -240,11 +239,15 @@ def snapshot_keychain_search_list(root):
     return original
 
 
-def preflight(root, tag, expected_sha, env=None, system=None):
+def preflight(root, tag, expected_sha, env=None, system=None, candidate=None):
     env = os.environ if env is None else env
     require((platform.system() if system is None else system) == "Darwin",
             "production signing requires macOS")
-    require(tag == TAG, "only new experimental rc.2 signing is authorized")
+    from bump_release import release_channel, validate_candidate
+    try:
+        release_channel(tag)
+    except ValueError:
+        raise SigningError("normalized vSemVer release tag required") from None
     require(isinstance(expected_sha, str) and re.fullmatch(r"[0-9a-f]{40}", expected_sha),
             "expected full commit SHA required")
     require(commit(root) == expected_sha, "checkout HEAD differs from expected SHA")
@@ -259,6 +262,14 @@ def preflight(root, tag, expected_sha, env=None, system=None):
                 "manual production dispatch must originate on main")
     else:
         raise SigningError("only tag push or main workflow_dispatch is allowed")
+    if candidate is not None:
+        require(event == "workflow_dispatch", "version candidates require main manual dispatch")
+        metadata = validate_candidate(root, candidate, expected_sha, production=True)
+        require(metadata["tag"] == tag, "version candidate differs from signing tag")
+        config = load_config(root, initialized=True, tag=tag, repository=env.get("GITHUB_REPOSITORY"))
+        require(config["repository"] == "CMYK" and config["cli"] == "image-cmyk",
+                "signer is restricted to CMYK")
+        return config
     tag_ref = "refs/tags/" + tag
     tag_exists = True
     if event == "workflow_dispatch":
@@ -675,7 +686,7 @@ def repack(directory, destination):
     zip_entries(destination.read_bytes(), directory.name)
 
 
-def production(root, tool4d, tag, expected_sha):
+def production(root, tool4d, tag, expected_sha, candidate=None):
     root = Path(root).absolute()
     require(not any(path.is_symlink() for path in (root, *root.parents)), "root symlinks prohibited")
     output = root / "dist/CMYK.signing.json"
@@ -707,7 +718,7 @@ def production(root, tool4d, tag, expected_sha):
 
     save()  # Invalidate any previous success before even preflight.
     try:
-        config = preflight(root, tag, expected_sha)
+        config = preflight(root, tag, expected_sha, candidate=candidate)
         stage = "presign"
         report["presign"] = validate_presign(root, config, expected_sha)
         regular(Path(tool4d))
@@ -903,16 +914,17 @@ def main():
     parser.add_argument("--tool4d", type=Path)
     parser.add_argument("--tag")
     parser.add_argument("--expected-sha")
+    parser.add_argument("--candidate", type=Path, help="verified version-only candidate bundle directory")
     args = parser.parse_args()
     try:
         if args.cleanup:
-            require(args.tool4d is None and args.tag is None and args.expected_sha is None,
+            require(args.tool4d is None and args.tag is None and args.expected_sha is None and args.candidate is None,
                     "--cleanup accepts only --root")
             print(json.dumps({"cleanup": cleanup(args.root)}))
             return
         require(args.tool4d is not None and args.tag is not None and args.expected_sha is not None,
                 "normal signing requires --tool4d, --tag and --expected-sha")
-        report = production(args.root, args.tool4d, args.tag, args.expected_sha)
+        report = production(args.root, args.tool4d, args.tag, args.expected_sha, candidate=args.candidate)
     except (SigningError, OSError, ValueError, TypeError, KeyError) as error:
         parser.exit(1, str(error) + "\n" if isinstance(error, SigningError) else "signing operation failed; diagnostic suppressed\n")
     print(json.dumps({"result": report["result"], "release_ready": False,

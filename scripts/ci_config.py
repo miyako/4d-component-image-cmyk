@@ -33,13 +33,15 @@ def load_config(root=ROOT, *, initialized=False, repository=None, tag=None):
         raise ValueError("invalid repository name")
     if not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", config.get("cli", "")):
         raise ValueError("invalid CLI name")
-    if not re.fullmatch(SEMVER, config.get("version", ""), flags=re.ASCII):
-        raise ValueError("version must be SemVer")
     manifest = json.loads((Path(root) / "package.json").read_text(encoding="utf-8"))
     if not isinstance(manifest, dict) or manifest.get("name") != config["repository"]:
         raise ValueError("package.json name must match template.json repository")
-    if manifest.get("version") != config["version"]:
+    version = manifest.get("version")
+    if not isinstance(version, str) or not re.fullmatch(SEMVER, version, flags=re.ASCII):
+        raise ValueError("package.json version must be SemVer")
+    if version != config.get("version"):
         raise ValueError("package.json version must match template.json version")
+    config["version"] = version
     if config["initialized"]:
         validate_initialization(
             config["repository"], config.get("namespace", ""), config["cli"],

@@ -1,0 +1,177 @@
+name: Bump and release
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Numeric-core bump, or promote the current prerelease without changing its core
+        type: choice
+        options: [major, minor, patch, promote]
+        default: patch
+        required: true
+      dry_run:
+        description: Validate an unpushed candidate only; no signing, tags or publication
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - '.github/workflows/bump-release.yml'
+      - '.github/workflows/release-build.yml'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/ci.yml'
+      - 'scripts/bump_release.py'
+      - 'scripts/sign_release.py'
+      - 'scripts/publish_prerelease.py'
+      - 'scripts/ci_config.py'
+      - 'tests/test_bump_release.py'
+      - 'tests/test_prerelease.py'
+      - 'tests/test_signing.py'
+      - 'tests/test_release_ref.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cmyk-bump-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+      tag: ${{ steps.candidate.outputs.tag }}
+      version: ${{ steps.candidate.outputs.version }}
+      dry_run: ${{ steps.mode.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Explicitly separate read-only PR validation from production
+        id: mode
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          dry_run=true
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$DRY_RUN" == "false" ]]; then
+            if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+              echo "Production bump/release must be dispatched on main." >&2
+              exit 1
+            fi
+            dry_run=false
+          fi
+          echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
+      - name: Prepare synchronized version-only commit without pushing it
+        id: candidate
+        env:
+          BUMP: ${{ inputs.bump || 'patch' }}
+          DRY_RUN: ${{ steps.mode.outputs.dry_run }}
+        shell: bash
+        run: |
+          args=()
+          if [[ "$DRY_RUN" == "false" ]]; then args+=(--production); fi
+          python scripts/bump_release.py prepare --bump "$BUMP" --base-sha "$(git rev-parse HEAD)" \
+            --output-dir build/release-candidate "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-source
+          path: |
+            build/release-candidate/candidate.json
+            build/release-candidate/candidate.bundle
+          if-no-files-found: error
+          retention-days: 30
+
+  validate:
+    needs: prepare
+    if: needs.prepare.outputs.dry_run == 'true'
+    uses: ./.github/workflows/release-build.yml
+    with:
+      source_sha: ${{ needs.prepare.outputs.sha }}
+      version_tag: ${{ needs.prepare.outputs.tag }}
+      source_bundle: release-candidate-source
+      dry_run: true
+
+  production:
+    needs: prepare
+    if: needs.prepare.outputs.dry_run == 'false' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/release-build.yml
+    with:
+      source_sha: ${{ needs.prepare.outputs.sha }}
+      version_tag: ${{ needs.prepare.outputs.tag }}
+      source_bundle: release-candidate-source
+    secrets: inherit
+
+  verify-dry-run:
+    needs: [prepare, validate]
+    if: needs.prepare.outputs.dry_run == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-candidate-source
+          path: build/release-candidate
+      - name: Restore exact tested candidate
+        env:
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: python scripts/bump_release.py restore --directory build/release-candidate --expected-sha "$SOURCE_SHA"
+      - uses: actions/download-artifact@v4
+        with:
+          name: compiled-release
+          path: dist
+      - name: Independently verify the same-run compiled artifact handoff
+        env:
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+        shell: python
+        run: |
+          import os, pathlib, sys
+          sys.path.insert(0, "scripts")
+          from publish_prerelease import presign_assets
+          assets = presign_assets(pathlib.Path(".").resolve(), os.environ["SOURCE_SHA"])
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("Dry run passed: native CLI on all three targets, pinned 20.7 tool4d harness/compiler, exact compiled ZIP and independent artifact download/checksums.\n\n")
+              summary.write("No version commit/tag was pushed; no signing credentials, notarization or publication were used. Normal 4D app/Intel/Windows 4D loading is not established by this harness.\n")
+
+  publish:
+    needs: [prepare, production]
+    if: needs.prepare.outputs.dry_run == 'false' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-candidate-source
+          path: build/release-candidate
+      - name: Restore exact signed candidate
+        run: python scripts/bump_release.py restore --directory build/release-candidate --expected-sha "$SOURCE_SHA"
+      - uses: actions/download-artifact@v4
+        with:
+          name: compiled-release
+          path: dist
+      - name: Validate signed bytes, then atomically fast-forward main and create the exact tag
+        run: |
+          python scripts/publish_prerelease.py --validate-signed --tag "$RELEASE_TAG" --expected-sha "$SOURCE_SHA"
+          python scripts/bump_release.py finalize --directory build/release-candidate --expected-sha "$SOURCE_SHA"
+      - name: Publish the already tested signed assets and verify downloaded uploads
+        run: python scripts/publish_prerelease.py --tag "$RELEASE_TAG" --expected-sha "$SOURCE_SHA"
