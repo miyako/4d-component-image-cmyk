@@ -48,6 +48,7 @@ jobs:
           path: build/release-candidate
       - name: Restore exact unpushed version candidate
         if: inputs.source_bundle != ''
+        shell: bash
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: python scripts/bump_release.py restore --directory build/release-candidate --expected-sha "$SOURCE_SHA"
@@ -87,6 +88,7 @@ jobs:
           path: build/release-candidate
       - name: Restore exact unpushed version candidate
         if: inputs.source_bundle != ''
+        shell: bash
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: python scripts/bump_release.py restore --directory build/release-candidate --expected-sha "$SOURCE_SHA"
@@ -135,6 +137,7 @@ jobs:
           path: build/release-candidate
       - name: Restore exact unpushed version candidate
         if: inputs.source_bundle != ''
+        shell: bash
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: python scripts/bump_release.py restore --directory build/release-candidate --expected-sha "$SOURCE_SHA"

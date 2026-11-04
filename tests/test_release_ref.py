@@ -183,6 +183,9 @@ class ReleaseRefTests(unittest.TestCase):
         self.assertEqual(ci.count("uses: actions/checkout@v4"), 3)
         self.assertEqual(ci.count("ref: ${{ inputs.source_bundle && github.sha || inputs.source_sha || github.sha }}"), 3)
         self.assertEqual(ci.count("scripts/bump_release.py restore"), 3)
+        self.assertEqual(ci.count(
+            "name: Restore exact unpushed version candidate\n"
+            "        if: inputs.source_bundle != ''\n        shell: bash\n"), 3)
         self.assertEqual(ci.count("&& !inputs.release_call"), 2)
         self.assertEqual(ci.count("github.event_name == 'workflow_dispatch' && inputs.accept_4d"), 2)
         self.assertIn("python scripts/accept_local.py --root .", ci)
