@@ -492,7 +492,7 @@ Run this before pushing a new release tag. The six signing credentials below are
 available only to production release signing, never PR CI.
 
 Ordinary publication requires `version_tag`, an **already existing**
-prerelease `v<SemVer>` tag matching the initialized
+`v<SemVer>` tag matching the initialized
 repository's `template.json.version` / `package.json.version`. It creates no
 tag. The gate resolves/peels that tag to a commit SHA, validates source at that
 SHA, and all reusable native CI, assembly, compilation and publication jobs use
@@ -501,6 +501,20 @@ tag explicitly. Publication refreshes and verifies the tag has not moved, uses
 `--verify-tag`, and remains blocked by compilation or final host failure.
 Do not manually dispatch publication or create a tag without user permission.
 The new workflow is not available in the default template before its PR merges.
+
+For this adopted repository, **Actions → Bump and release** additionally offers
+`major`, `minor`, `patch` and `promote`, with dry run enabled by default.
+`package.json.version` is authoritative; component metadata, host assertions and
+the current class version example must remain synchronized. A disposable,
+deterministic version-only commit is bundled without pushing it, built on all
+three native targets and checked by the pinned tool4d/compiler/package pipeline.
+Dry run uses no signing secrets, remote version/tag writes or publication.
+Production requires explicit user-authorized dispatch on `main` with dry run
+disabled; only after all signed-distribution gates pass may main/tag be pushed
+atomically and the verified assets published. No force/protection bypass is
+permitted. Stable tags publish as stable/Latest; real SemVer prereleases do not.
+See README for numeric bump and RC promotion rules. Preflight cannot reuse a tag
+already bound to different source; use a bump dry run instead, never retag.
 
 ## 7. Report evidence, not assumptions
 
@@ -637,8 +651,9 @@ container/Apple `Contents/` layout requires deliberate packaging changes.
 
 ### Six Apple secrets: production signing only
 
-The adopted CMYK `.github/workflows/release.yml` invokes `scripts/sign_release.py`
-with these six secrets on production events only. Every signature, notarization
+The adopted CMYK release and bump entrypoints share
+`.github/workflows/release-build.yml`, which invokes `scripts/sign_release.py`
+with these six secrets on production events only, never a dry run. Every signature, notarization
 `Accepted`, DMG staple/Gatekeeper and final-payload check is fail-closed.
 Registration alone does not establish signing success. No secret below is
 required by the free local compiler, PR CI or unsigned local acceptance.

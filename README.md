@@ -396,6 +396,10 @@ and leave `version_tag` empty:
 gh workflow run release.yml --ref main -f preflight=true
 ```
 
+Preflight cannot reuse a version tag already bound to another commit. After
+changes to an already tagged version, use the **Bump and release** dry run to
+validate a new candidate; never move the existing tag.
+
 This preflight is intended to build, sign and notarize without creating a tag
 or publishing a release. It still requires the hosted 4D opt-in
 `FOURD_ENABLED=true`. The six required signing/notarization secrets are already

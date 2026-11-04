@@ -159,7 +159,7 @@ class CandidateTests(GitFixture):
         self.assertEqual(first["source_sha"], second["source_sha"])
         self.assertEqual(first["tree_sha"], second["tree_sha"])
         commit = self.git("cat-file", "commit", first["source_sha"])
-        self.assertIn(bump.COAUTHOR, commit)
+        self.assertIn("Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com>", commit)
         self.assertIn("1700000001 +0000", commit)
 
     def test_full_bundle_restores_fresh_clone_and_exact_version_surfaces(self):
