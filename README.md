@@ -363,7 +363,18 @@ assets. The final signed package must undergo another strict tool4d harness
 run; that rerun still does **not** validate normal external component
 installation/loading in the actual 4D application.
 
-No successful signed/notarized preflight is claimed here yet. The candidate
+Payload trust checks reuse the exact commands verified against the published
+[Text-to-SVG v0.1.1 release](https://github.com/miyako/Text-to-SVG/releases/tag/v0.1.1)
+and its [same-revision signer](https://github.com/miyako/Text-to-SVG/blob/620cd1e5987cf93812aab4d932a8beee81dd60c7/scripts/sign_release.py#L708-L719):
+`codesign --verify --strict --all-architectures --check-notarization -R=notarized`
+for **each** Mach-O payload, plus `spctl --type open` for the signed DMG.
+The reference's genuinely notarized bare CLI also produces `spctl`'s
+"the code is valid but does not seem to be an app" rejection. CMYK records that
+exact diagnostic as a failed, non-applicable CLI probe, never as acceptance;
+any other rejection remains fatal. Direct online notarization and DMG Gatekeeper
+checks remain mandatory, not fallback successes.
+
+Only a completed successful preflight establishes the recorded gates. The candidate
 remains an experimental prerelease with partial acceptance and
 `release_ready:false`, even if signing subsequently passes. Publication is a
 separate explicitly approved operation using an existing matching prerelease

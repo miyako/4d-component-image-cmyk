@@ -53,7 +53,7 @@ def require(condition, label):
         raise SigningError(label)
 
 
-def run(label, arguments, *, cwd=None, timeout=120, data=None, env=None):
+def capture(label, arguments, *, cwd=None, timeout=120, data=None, env=None):
     """Never expose argv, captured output, or subprocess exception text."""
     try:
         clean_env = {key: value for key, value in (os.environ if env is None else env).items()
@@ -64,6 +64,11 @@ def run(label, arguments, *, cwd=None, timeout=120, data=None, env=None):
         raise SigningError(label + ": timeout") from None
     except OSError:
         raise SigningError(label + ": command unavailable") from None
+    return process
+
+
+def run(label, arguments, *, cwd=None, timeout=120, data=None, env=None):
+    process = capture(label, arguments, cwd=cwd, timeout=timeout, data=data, env=env)
     if process.returncode:
         diagnostic = (process.stdout + process.stderr).decode("utf-8", errors="replace")
         categories = (
@@ -570,7 +575,7 @@ def accepted_notarization(data):
     return {"status": "Accepted", "id": identifier}
 
 
-def gatekeeper_assess(path, team, kind):
+def gatekeeper_assess(path, team, kind, *, classify_non_app=False):
     require(kind in ("dmg", "cli"), "unsupported Gatekeeper assessment kind")
     policy_command = ["/usr/sbin/spctl", "--status"]
     out, err = run("inspect Gatekeeper policy", policy_command)
@@ -578,18 +583,26 @@ def gatekeeper_assess(path, team, kind):
     command = ["/usr/sbin/spctl", "--assess", "--verbose=4", "--type"]
     command += ["open", "--context", "context:primary-signature"] if kind == "dmg" else ["execute"]
     command.append(str(path))
-    out, err = run("Gatekeeper DMG assessment" if kind == "dmg" else "Gatekeeper shipped CLI assessment",
-                   command, timeout=300)
-    lines = [line.strip() for line in text(out + err).splitlines() if line.strip()]
-    accepted = str(path) + ": accepted"
-    require(lines.count(accepted) == 1, "Gatekeeper did not explicitly accept the exact artifact")
-    sources = [line for line in lines if line.startswith("source=")]
-    require(sources == ["source=Notarized Developer ID"], "Gatekeeper notarized Developer ID source required")
+    result = capture("Gatekeeper DMG assessment" if kind == "dmg" else "Gatekeeper shipped CLI assessment",
+                     command, timeout=300)
+    lines = [line.strip() for line in text(result.stdout + result.stderr).splitlines() if line.strip()]
     origins = [line for line in lines if line.startswith("origin=")]
     require(len(origins) <= 1, "ambiguous Gatekeeper origin")
     if origins:
         match = re.fullmatch(r"origin=Developer ID Application: .+ \(([A-Z0-9]{10})\)", origins[0])
         require(match is not None and match[1] == team, "Gatekeeper origin team does not match signing certificate")
+    non_app = str(path) + ": rejected (the code is valid but does not seem to be an app)"
+    if classify_non_app and kind == "cli" and result.returncode == 3 and lines.count(non_app) == 1:
+        require(set(lines) == {non_app, *origins}, "unexpected metadata alongside non-app diagnostic")
+        return {"status": "failed", "applicable": False, "classification": "valid_non_app",
+                "attempted": True, "exit_code": 3,
+                "reason": "spctl reported valid code but not an app; direct notarized requirement is mandatory",
+                "diagnostic": "the code is valid but does not seem to be an app", "command": command}
+    require(result.returncode == 0, "Gatekeeper assessment rejected artifact")
+    accepted = str(path) + ": accepted"
+    require(lines.count(accepted) == 1, "Gatekeeper did not explicitly accept the exact artifact")
+    sources = [line for line in lines if line.startswith("source=")]
+    require(sources == ["source=Notarized Developer ID"], "Gatekeeper notarized Developer ID source required")
     team_lines = [line for line in lines
                   if re.match(r"^(?:teamidentifier|team-id|teamid|team_id|team)=", line, re.IGNORECASE)]
     require(all(line.split("=", 1)[1] == team for line in team_lines), "Gatekeeper reported unexpected team")
@@ -597,7 +610,7 @@ def gatekeeper_assess(path, team, kind):
     # success-shaped diagnostics. Do not retain raw origin/account/team text.
     allowed = {accepted, *sources, *origins, *team_lines}
     require(all(line in allowed for line in lines), "Gatekeeper returned unexpected or bypass assessment metadata")
-    return {"accepted": True, "source": "Notarized Developer ID", "policy": "assessments enabled",
+    return {"status": "passed", "accepted": True, "source": "Notarized Developer ID", "policy": "assessments enabled",
             "origin_present": bool(origins), "reported_team_match": True if origins or team_lines else None,
             "command": command, "policy_command": policy_command}
 
@@ -792,10 +805,20 @@ def production(root, tool4d, tag, expected_sha):
             final_payload = extract(signed_zip, scratch / "signed-final")
             require(inventory(final_payload) == after, "final signed ZIP payload mismatch")
             stage = "payload_assessment"
+            notarized_objects = []
             for name in sorted(CODE):
                 verify_signature(final_payload / name, team, CODE[name],
                                  certificate_sha1=fingerprint, scratch=scratch)
-            passed(stage, gatekeeper_assess(final_payload / "Resources/bin/macOS/image-cmyk", team, "cli"))
+                command = ["/usr/bin/codesign", "--verify", "--strict", "--all-architectures",
+                           "--check-notarization", "-R=notarized", str(final_payload / name)]
+                run("verify payload online notarization requirement", command, timeout=300)
+                notarized_objects.append({"path": name, "status": "passed", "command": command})
+            # Same payload/container checks as published Text-to-SVG v0.1.1 at
+            # 620cd1e: direct notarization for Mach-O, Gatekeeper for the DMG.
+            cli_probe = gatekeeper_assess(final_payload / "Resources/bin/macOS/image-cmyk",
+                                         team, "cli", classify_non_app=True)
+            passed(stage, {"method": "strict_online_notarization", "objects": notarized_objects,
+                           "cli_spctl": cli_probe, "reference": "miyako/Text-to-SVG@620cd1e5987cf93812aab4d932a8beee81dd60c7"})
             stage = "cli_smoke"
             out, err = run("signed CLI version smoke", [str(final_payload / "Resources/bin/macOS/image-cmyk"), "--version"])
             try:

@@ -43,6 +43,9 @@ release_ready:false; this is not full cross-platform/application acceptance.
 
 The macOS CLI and native library are Developer ID signed with secure timestamps.
 CMYK.dmg is separately signed, Apple notarization Accepted, stapled and assessed.
+Every macOS payload code object separately passed Apple's online notarization
+check and explicit `notarized` requirement. A bare-CLI spctl non-app diagnostic
+is retained as a failed applicability probe, not claimed as app acceptance.
 CMYK.zip contains the identical signed payload; ZIP itself cannot be stapled.
 Windows is unsigned (no Authenticode credentials); no Windows signing claim.
 Replace the predecessor component/dependency rather than loading both packages.
@@ -187,6 +190,25 @@ def publication_assets(root, tag, expected_sha, *, tag_required=True):
         raise ValueError("exact signed ZIP tool4d harness evidence is required")
     if signed["steps"]["normal_4d_application"]["status"] != "not_run":
         raise ValueError("this workflow cannot claim normal 4D application loading")
+    assessment = signed["steps"]["payload_assessment"]["details"]
+    expected_objects = {"Libraries/lib4d-arm64.dylib", "Resources/bin/macOS/image-cmyk"}
+    objects = assessment["objects"]
+    if (assessment.get("method") != "strict_online_notarization" or len(objects) != 2
+            or {item["path"] for item in objects} != expected_objects
+            or any(item.get("status") != "passed"
+                   or item.get("command", [])[:-1] != [
+                       "/usr/bin/codesign", "--verify", "--strict", "--all-architectures",
+                       "--check-notarization", "-R=notarized"] for item in objects)):
+        raise ValueError("explicit online notarized requirement must pass for both payload code objects")
+    probe = assessment["cli_spctl"]
+    if probe.get("status") == "passed":
+        if probe.get("accepted") is not True or probe.get("source") != "Notarized Developer ID":
+            raise ValueError("invalid accepted CLI Gatekeeper probe")
+    elif not (probe.get("status") == "failed" and probe.get("applicable") is False
+              and probe.get("classification") == "valid_non_app" and probe.get("attempted") is True
+              and probe.get("exit_code") == 3
+              and probe.get("diagnostic") == "the code is valid but does not seem to be an app"):
+        raise ValueError("unclassified CLI Gatekeeper rejection remains a blocker")
     validate_payload_evidence(signed)
     return [*assets, dmg, evidence]
 

@@ -80,6 +80,14 @@ class PrereleaseTests(unittest.TestCase):
         self.signing["steps"]["signed_compiled_harness"]["details"] = copy.deepcopy(
             self.report["steps"]["compiled_host"]["details"])
         self.signing["steps"]["normal_4d_application"] = {"status": "not_run"}
+        self.signing["steps"]["payload_assessment"]["details"] = {
+            "method": "strict_online_notarization",
+            "cli_spctl": {"status": "passed", "accepted": True, "source": "Notarized Developer ID"},
+            "objects": [
+                {"path": path, "status": "passed",
+                 "command": ["/usr/bin/codesign", "--verify", "--strict", "--all-architectures",
+                             "--check-notarization", "-R=notarized", "/staging/" + path]}
+                for path in before if path != "CMYK.4DZ"]}
         for name, value in (("load_config", self.config), ("commit", self.sha),
                             ("source_digest", self.digest), ("verify_tag", self.sha)):
             mock = patch.object(publisher, name, return_value=value)
@@ -203,6 +211,30 @@ class PrereleaseTests(unittest.TestCase):
         self.assertEqual(len(assets), 5)
         verify.assert_not_called()
         run.assert_not_called()
+
+    def test_requires_direct_ticket_checks_even_for_known_non_app_probe(self):
+        assessment = self.signing["steps"]["payload_assessment"]["details"]
+        assessment["cli_spctl"] = {
+            "status": "failed", "applicable": False, "classification": "valid_non_app",
+            "attempted": True, "exit_code": 3,
+            "diagnostic": "the code is valid but does not seem to be an app"}
+        self.save()
+        self.validate()
+        original = copy.deepcopy(assessment)
+        for change in ("failed-ticket", "missing-ticket-check", "unknown-rejection", "wrong-exit"):
+            self.signing["steps"]["payload_assessment"]["details"] = copy.deepcopy(original)
+            current = self.signing["steps"]["payload_assessment"]["details"]
+            if change == "failed-ticket":
+                current["objects"][0]["status"] = "failed"
+            elif change == "missing-ticket-check":
+                current["objects"][0]["command"].remove("--check-notarization")
+            elif change == "unknown-rejection":
+                current["cli_spctl"]["diagnostic"] = "Unnotarized Developer ID"
+            else:
+                current["cli_spctl"]["exit_code"] = 1
+            self.save()
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.validate()
 
     def test_uploaded_bytes_are_downloaded_and_hashed_before_publication(self):
         assets = [self.dist / "CMYK.zip", self.dist / "CMYK.signing.json"]

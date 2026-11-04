@@ -616,7 +616,7 @@ class SignatureTests(Fixture):
 
 
 class GatekeeperTests(Fixture):
-    def assess(self, output, policy=b"assessments enabled\n", kind="dmg"):
+    def assess(self, output, policy=b"assessments enabled\n", kind="dmg", code=0, classify=False):
         path = self.root / ("CMYK.dmg" if kind == "dmg" else "image-cmyk")
 
         def command(label, args, **kwargs):
@@ -624,9 +624,32 @@ class GatekeeperTests(Fixture):
                 return policy, b""
             return b"", output.replace(b"$PATH", str(path).encode())
 
-        with patch.object(signing, "run", side_effect=command) as commands:
-            result = signing.gatekeeper_assess(path, TEAM, kind)
-        return result, commands.call_args_list
+        def capture(label, args, **kwargs):
+            out, err = command(label, args, **kwargs)
+            return subprocess.CompletedProcess(args, code, out, err)
+
+        with patch.object(signing, "run", side_effect=command) as commands, \
+                patch.object(signing, "capture", side_effect=capture) as captures:
+            result = signing.gatekeeper_assess(path, TEAM, kind, classify_non_app=classify)
+        return result, commands.call_args_list + captures.call_args_list
+
+    def test_only_exact_non_app_diagnostic_can_be_classified_after_direct_ticket_checks(self):
+        non_app = b"$PATH: rejected (the code is valid but does not seem to be an app)\n"
+        result, _ = self.assess(non_app, kind="cli", code=3, classify=True)
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(result["applicable"])
+        self.assertEqual(result["classification"], "valid_non_app")
+        self.assertTrue(result["attempted"])
+        self.assertEqual(result["exit_code"], 3)
+        for output, kind, code, classify in (
+            (non_app, "dmg", 3, True), (non_app, "cli", 3, False),
+            (non_app, "cli", 1, True),
+            (b"$PATH: rejected\nsource=Unnotarized Developer ID\n", "cli", 3, True),
+            (non_app + b"override=disabled\n", "cli", 3, True),
+            (non_app + b"origin=Developer ID Application: Example (WRONG12345)\n", "cli", 3, True),
+        ):
+            with self.subTest(output=output, kind=kind, code=code), self.assertRaises(signing.SigningError):
+                self.assess(output, kind=kind, code=code, classify=classify)
 
     def test_notarized_acceptance_source_team_and_commands(self):
         output = ("$PATH: accepted\nsource=Notarized Developer ID\n"
@@ -764,7 +787,9 @@ class PipelineTests(Fixture):
                 patch.object(signing, "signing_keychain", side_effect=keychain), \
                 patch.object(signing, "verify_signature"), \
                 patch.object(signing, "mounted", side_effect=mount), \
-                patch.object(signing, "run", side_effect=command):
+                patch.object(signing, "run", side_effect=command), \
+                patch.object(signing, "capture", side_effect=lambda label, args, **kwargs:
+                             subprocess.CompletedProcess(args, 0, *command(label, args, **kwargs))):
             report = signing.production(self.root, tool, signing.TAG, SHA)
         self.assertTrue(report["finished"])
         self.assertEqual(report["result"], "partial")
@@ -774,6 +799,14 @@ class PipelineTests(Fixture):
         self.assertEqual(signing.sha256(archive), report["artifacts"]["zip"]["sha256"])
         self.assertEqual(signing.sha256(acceptance), presign["acceptance_sha256"])
         self.assertEqual(signing.sha256(native), presign["native_evidence_sha256"])
+        checks = [args for label, args, _ in commands
+                  if label == "verify payload online notarization requirement"]
+        self.assertEqual(len(checks), len(signing.CODE))
+        for args in checks:
+            self.assertEqual(args[:-1], ["/usr/bin/codesign", "--verify", "--strict", "--all-architectures",
+                                        "--check-notarization", "-R=notarized"])
+        self.assertEqual(report["steps"]["payload_assessment"]["details"]["method"],
+                         "strict_online_notarization")
         self.assertEqual((self.root / report["presign"]["retained_path"]).read_bytes(), original_bytes)
         signing.validate_changes(report["payload"]["before"], report["payload"]["after"])
         serialized = json.loads(json.dumps(report))
