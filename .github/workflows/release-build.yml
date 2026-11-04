@@ -139,6 +139,19 @@ jobs:
           python scripts/accept_local.py --root . --repository "$GITHUB_REPOSITORY" \
             --tool4d .tools/tool4d.app/Contents/MacOS/tool4d 2>&1 | tee build/release-acceptance.log
           python scripts/publish_prerelease.py --write-native-evidence
+      - name: Require candidate invariants after native and compiler outputs
+        if: inputs.source_bundle != ''
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        shell: python
+        run: |
+          import os, pathlib, subprocess, sys
+          sys.path.insert(0, "scripts")
+          from bump_release import validate_candidate
+          status = subprocess.check_output(["git", "status", "--short"]).decode("utf-8")
+          print("Post-build source status:\n" + (status or "(clean)"))
+          validate_candidate(pathlib.Path(".").resolve(), pathlib.Path("build/release-candidate"),
+                             os.environ["RELEASE_SHA"], production=os.environ["DRY_RUN"] != "true")
       - name: Sign, notarize and verify the exact production distribution
         if: '!inputs.dry_run'
         env:

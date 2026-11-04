@@ -253,6 +253,9 @@ class ReleaseRefTests(unittest.TestCase):
         self.assertIn("production release builds cannot run on PR events", build)
         self.assertEqual(build.count("if: '!inputs.dry_run'"), 2)
         self.assertIn("if: always() && !inputs.dry_run", build)
+        self.assertLess(build.index("Require candidate invariants after native and compiler outputs"),
+                        build.index("Sign, notarize and verify the exact production distribution"))
+        self.assertIn('print("Post-build source status:', build)
 
 
 if __name__ == "__main__":
