@@ -428,6 +428,11 @@ exact diagnostic as a failed, non-applicable CLI probe, never as acceptance;
 any other rejection remains fatal. Direct online notarization and DMG Gatekeeper
 checks remain mandatory, not fallback successes.
 
+The compiler harness runs from an isolated copy under `build/`, not its
+versioned project: tool4d creates a catalog and DerivedData on opening a project.
+The post-compiler candidate checkpoint still requires a clean source checkout;
+runtime caches are not an excuse to ignore or reset source changes.
+
 Only a completed successful preflight establishes the recorded gates. Evidence
 retains partial acceptance and `release_ready:false` because the automated
 harness does not establish full normal-application/cross-platform acceptance.
