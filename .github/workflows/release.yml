@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: Existing matching prerelease tag; leave empty for main-only preflight
+        description: Existing matching SemVer tag; leave empty for main-only preflight
         required: false
         type: string
       preflight:
@@ -52,101 +52,16 @@ jobs:
           RELEASE_TAG: ${{ steps.release_ref.outputs.tag }}
         run: python scripts/ci_config.py validate --release --tag "$RELEASE_TAG"
 
-  native:
+  build:
     needs: gate
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/release-build.yml
     with:
       source_sha: ${{ needs.gate.outputs.source_sha }}
-      release_call: true
-
-  compile:
-    needs: [gate, native]
-    runs-on: macos-15
-    env:
-      FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
-      # Production uses the unchanged official package.json pin, never mutable overrides.
-      TOOL4D_URL: ''
-      TOOL4D_SHA256: ''
-      RELEASE_TAG: ${{ needs.gate.outputs.release_tag }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.gate.outputs.source_sha }}
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python scripts/ci_config.py validate --release --tag "$RELEASE_TAG"
-      - uses: actions/download-artifact@v4
-        with:
-          name: cli-macos-x64
-          path: build/macos-x64
-      - uses: actions/download-artifact@v4
-        with:
-          name: cli-macos-arm64
-          path: build/macos-arm64
-      - uses: actions/download-artifact@v4
-        with:
-          name: cli-windows-x64
-          path: build/windows-x64
-      - name: Download SHA-256-verified tool4D
-        run: python scripts/ci_config.py download-tool4d
-      - name: Require tool4d source/compiler/exact unpacked compiled-package harness checks
-        shell: bash
-        run: |
-          set -o pipefail
-          python scripts/accept_local.py --root . --repository "$GITHUB_REPOSITORY" \
-            --tool4d .tools/tool4d.app/Contents/MacOS/tool4d 2>&1 | tee build/release-acceptance.log
-          python scripts/publish_prerelease.py --write-native-evidence
-      - name: Sign payload and DMG, notarize, staple and verify exact signed distribution
-        env:
-          APPLE_DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE }}
-          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-          NOTARYTOOL_APPLE_ID: ${{ secrets.NOTARYTOOL_APPLE_ID }}
-          NOTARYTOOL_PASSWORD: ${{ secrets.NOTARYTOOL_PASSWORD }}
-          NOTARYTOOL_TEAM_ID: ${{ secrets.NOTARYTOOL_TEAM_ID }}
-          RELEASE_SHA: ${{ needs.gate.outputs.source_sha }}
-        run: >-
-          python scripts/sign_release.py --root .
-          --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
-          --tag "$RELEASE_TAG" --expected-sha "$RELEASE_SHA"
-      - name: Always remove generated signing credentials and detach temporary images
-        if: always()
-        run: python scripts/sign_release.py --root . --cleanup
-      - name: Validate final signed-byte publication gates before any tag or publication
-        env:
-          RELEASE_SHA: ${{ needs.gate.outputs.source_sha }}
-        run: >-
-          python scripts/publish_prerelease.py --validate-signed
-          --tag "$RELEASE_TAG" --expected-sha "$RELEASE_SHA"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: compiled-release
-          path: |
-            dist/*.zip
-            dist/*.dmg
-            dist/*.acceptance.json
-            dist/*.native-evidence.json
-            dist/*.signing.json
-          if-no-files-found: error
-          retention-days: 30
-      - name: Preserve raw release evidence even on failure
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-evidence
-          path: |
-            build/acceptance.json
-            build/*-status.json
-            build/release-acceptance.log
-            build/*/build-manifest.json
-            dist/*.signing.json
-          if-no-files-found: warn
-          retention-days: 30
+      version_tag: ${{ needs.gate.outputs.release_tag }}
+    secrets: inherit
 
   publish:
-    needs: [gate, compile]
+    needs: [gate, build]
     if: github.event_name != 'workflow_dispatch' || !inputs.preflight
     runs-on: ubuntu-24.04
     permissions:

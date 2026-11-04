@@ -104,7 +104,7 @@ class ReleaseRefTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "current origin/main"):
             self.preflight(event_sha="f" * 40)
         with patch.object(release_ref, "load_config", return_value={"version": "0.1.0-rc.2"}):
-            with self.assertRaisesRegex(ValueError, "matching prerelease"):
+            with self.assertRaisesRegex(ValueError, "matching version"):
                 self.resolve(preflight=True, ref_type="branch", ref_name="main",
                              event_sha=self.sha, version_tag="v0.1.0-rc.9")
 
@@ -181,7 +181,8 @@ class ReleaseRefTests(unittest.TestCase):
         ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertEqual(ci.count("uses: actions/checkout@v4"), 3)
-        self.assertEqual(ci.count("ref: ${{ inputs.source_sha || github.sha }}"), 3)
+        self.assertEqual(ci.count("ref: ${{ inputs.source_bundle && github.sha || inputs.source_sha || github.sha }}"), 3)
+        self.assertEqual(ci.count("scripts/bump_release.py restore"), 3)
         self.assertEqual(ci.count("&& !inputs.release_call"), 2)
         self.assertEqual(ci.count("github.event_name == 'workflow_dispatch' && inputs.accept_4d"), 2)
         self.assertIn("python scripts/accept_local.py --root .", ci)
@@ -195,14 +196,16 @@ class ReleaseRefTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", release)
         self.assertIn("fetch-depth: 0", release)
         self.assertIn("source_sha: ${{ needs.gate.outputs.source_sha }}", release)
-        self.assertIn("release_call: true", release)
-        self.assertEqual(release.count("ref: ${{ needs.gate.outputs.source_sha }}"), 2)
-        self.assertEqual(release.count('validate --release --tag "$RELEASE_TAG"'), 2)
-        self.assertIn('scripts/accept_local.py --root . --repository "$GITHUB_REPOSITORY"', release)
-        self.assertIn("set -o pipefail", release)
-        self.assertIn("scripts/publish_prerelease.py --write-native-evidence", release)
-        self.assertIn("dist/*.acceptance.json", release)
-        self.assertIn("dist/*.native-evidence.json", release)
+        build = (ROOT / ".github/workflows/release-build.yml").read_text()
+        self.assertIn("uses: ./.github/workflows/release-build.yml", release)
+        self.assertIn("release_call: true", build)
+        self.assertEqual(release.count("ref: ${{ needs.gate.outputs.source_sha }}"), 1)
+        self.assertEqual((release + build).count('validate --release --tag "$RELEASE_TAG"'), 2)
+        self.assertIn('scripts/accept_local.py --root . --repository "$GITHUB_REPOSITORY"', build)
+        self.assertIn("set -o pipefail", build)
+        self.assertIn("scripts/publish_prerelease.py --write-native-evidence", build)
+        self.assertIn("dist/*.acceptance.json", build)
+        self.assertIn("dist/*.native-evidence.json", build)
         self.assertLess(release.index("release_ref.py verify"),
                         release.index('publish_prerelease.py --tag "$RELEASE_TAG"'))
         self.assertIn('git fetch --force --no-tags origin "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"', release)
@@ -212,26 +215,41 @@ class ReleaseRefTests(unittest.TestCase):
 
     def test_signing_is_production_only_and_preflight_never_publishes(self):
         release = (ROOT / ".github/workflows/release.yml").read_text()
+        build = (ROOT / ".github/workflows/release-build.yml").read_text()
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'", release)
         self.assertIn("if: github.event_name != 'workflow_dispatch' || !inputs.preflight", release)
-        self.assertIn("scripts/sign_release.py --root .", release)
-        self.assertIn("dist/*.dmg", release)
-        self.assertIn("dist/*.signing.json", release)
-        self.assertNotIn("continue-on-error", release)
+        self.assertIn("scripts/sign_release.py --root .", build)
+        self.assertIn("dist/*.dmg", build)
+        self.assertIn("dist/*.signing.json", build)
+        self.assertNotIn("continue-on-error", release + build)
         for secret in ("APPLE_DEVELOPER_ID_CERTIFICATE", "APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD",
                        "KEYCHAIN_PASSWORD", "NOTARYTOOL_APPLE_ID", "NOTARYTOOL_PASSWORD",
                        "NOTARYTOOL_TEAM_ID"):
-            self.assertEqual(release.count("${{ secrets." + secret + " }}"), 1)
+            self.assertEqual(build.count("${{ secrets." + secret + " }}"), 1)
             self.assertNotIn(secret, ci)
         self.assertNotIn("CODESIGN_APPLE_ID", release)
-        self.assertIn("TOOL4D_URL: ''", release)
-        self.assertIn("TOOL4D_SHA256: ''", release)
+        self.assertIn("TOOL4D_URL: ''", build)
+        self.assertIn("TOOL4D_SHA256: ''", build)
 
     def test_signing_checkout_retains_tag_refs_for_exact_push_verification(self):
-        release = (ROOT / ".github/workflows/release.yml").read_text()
-        compilation = release.split("\n  compile:\n", 1)[1].split("\n  publish:\n", 1)[0]
-        self.assertIn("ref: ${{ needs.gate.outputs.source_sha }}\n          fetch-depth: 0", compilation)
+        release = (ROOT / ".github/workflows/release-build.yml").read_text()
+        compilation = release.split("\n  compile:\n", 1)[1]
+        self.assertIn("ref: ${{ inputs.source_bundle && github.sha || inputs.source_sha }}\n          fetch-depth: 0", compilation)
+
+    def test_bump_pr_validation_cannot_sign_push_or_publish(self):
+        workflow = (ROOT / ".github/workflows/bump-release.yml").read_text()
+        build = (ROOT / ".github/workflows/release-build.yml").read_text()
+        validation = workflow.split("\n  validate:\n", 1)[1].split("\n  production:\n", 1)[0]
+        self.assertIn("dry_run: true", validation)
+        self.assertNotIn("secrets:", validation)
+        self.assertIn("github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("scripts/bump_release.py finalize", workflow)
+        self.assertIn("presign_assets", workflow)
+        self.assertIn("production release builds cannot run on PR events", build)
+        self.assertEqual(build.count("if: '!inputs.dry_run'"), 2)
+        self.assertIn("if: always() && !inputs.dry_run", build)
 
 
 if __name__ == "__main__":

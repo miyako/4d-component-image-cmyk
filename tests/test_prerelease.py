@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -105,18 +106,21 @@ class PrereleaseTests(unittest.TestCase):
     def validate(self):
         return publisher.publication_assets(self.root, "v0.1.0-rc.2", self.sha)
 
-    def test_only_real_semver_prereleases_are_allowed(self):
+    def test_channel_distinguishes_prerelease_from_build_metadata(self):
         for tag in ("v0.1.0-rc.1", "v1.2.3-beta+build-id"):
-            publisher.require_prerelease(tag)
-        for tag in ("v0.1.0", "v1.2.3+build-with-hyphen", "main", "v01.0.0-rc.1"):
+            self.assertEqual(publisher.release_channel(tag), {"prerelease": True, "latest": False})
+        for tag in ("v0.1.0", "v1.2.3+build-with-hyphen"):
+            self.assertEqual(publisher.release_channel(tag), {"prerelease": False, "latest": True})
+        for tag in ("main", "v01.0.0-rc.1", "v1.0.0-01"):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
-                publisher.require_prerelease(tag)
+                publisher.release_channel(tag)
 
     def test_create_is_atomically_prerelease_never_latest(self):
         with patch.object(publisher.subprocess, "run") as run, \
                 patch.object(publisher, "verify_uploaded_assets") as verify_upload, \
                 patch.object(publisher, "release_metadata", side_effect=[
-                    {"draft": True, "prerelease": True}, {"draft": False, "prerelease": True}]):
+                    None, {"id": 123, "draft": True, "prerelease": True},
+                    {"draft": False, "prerelease": True}]):
             publisher.publish(self.root, "v0.1.0-rc.2", self.sha)
         args = run.call_args_list[0].args[0]
         self.assertEqual(args[:4], ["gh", "release", "create", "v0.1.0-rc.2"])
@@ -124,9 +128,63 @@ class PrereleaseTests(unittest.TestCase):
             self.assertIn(flag, args)
         self.assertTrue(run.call_args.kwargs["check"])
         self.assertEqual(len([arg for arg in args if arg.endswith(".json")]), 3)
-        verify_upload.assert_called_once()
-        self.assertEqual(run.call_args.args[0][:5],
-                         ["gh", "release", "edit", "v0.1.0-rc.2", "--draft=false"])
+        self.assertEqual(verify_upload.call_count, 2)
+        self.assertEqual(run.call_args.args[0][:4], ["gh", "api", "--method", "PATCH"])
+        self.assertIn("prerelease=true", run.call_args.args[0])
+        self.assertIn("make_latest=false", run.call_args.args[0])
+
+    def test_stable_release_is_created_stable_and_explicitly_latest_after_verification(self):
+        response = subprocess.CompletedProcess([], 0, stdout='{"tag_name":"v0.1.0"}')
+        with patch.object(publisher, "publication_assets", return_value=[]), \
+                patch.object(publisher, "verify_uploaded_assets") as verify_upload, \
+                patch.object(publisher, "verify_tag"), \
+                patch.object(publisher.subprocess, "run", return_value=response) as run, \
+                patch.object(publisher, "release_metadata", side_effect=[
+                    None, {"id": 124, "draft": True, "prerelease": False},
+                    {"draft": False, "prerelease": False}]):
+            publisher.publish(self.root, "v0.1.0", self.sha)
+        self.assertIn("--prerelease=false", run.call_args_list[0].args[0])
+        self.assertIn("make_latest=true", run.call_args_list[-2].args[0])
+        self.assertIn("prerelease=false", run.call_args_list[-2].args[0])
+        self.assertEqual(verify_upload.call_count, 2)
+
+    def test_existing_release_requires_same_source_channel_and_asset_hashes(self):
+        with patch.object(publisher, "release_metadata", return_value={
+                "draft": True, "prerelease": True, "body": "unrelated existing draft"}), \
+                patch.object(publisher.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "exact source"):
+                publisher.publish(self.root, "v0.1.0-rc.2", self.sha)
+        run.assert_not_called()
+
+    def test_matching_published_retry_verifies_bytes_and_remote_tag_without_mutation(self):
+        assets = self.validate()
+        marker = "\n\nVerified release source: " + self.sha + "\n" + "\n".join(
+            path.name + " SHA256: " + publisher.sha256(path) for path in assets)
+        existing = {"draft": False, "prerelease": True, "body": "notes" + marker}
+        with patch.object(publisher, "release_metadata", return_value=existing), \
+                patch.object(publisher, "verify_uploaded_assets") as download, \
+                patch.object(publisher.subprocess, "run") as run:
+            publisher.publish(self.root, "v0.1.0-rc.2", self.sha)
+        download.assert_called_once()
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0][:2], ["git", "fetch"])
+
+    def test_partial_owned_draft_uploads_only_missing_identical_candidate_assets(self):
+        assets = self.validate()
+        marker = "\n\nVerified release source: " + self.sha + "\n" + "\n".join(
+            path.name + " SHA256: " + publisher.sha256(path) for path in assets)
+        draft = {"id": 125, "draft": True, "prerelease": True, "body": "notes" + marker,
+                 "assets": [{"name": path.name} for path in assets[:-1]]}
+        with patch.object(publisher, "release_metadata", side_effect=[
+                draft, draft, {"draft": False, "prerelease": True}]), \
+                patch.object(publisher, "verify_uploaded_assets") as download, \
+                patch.object(publisher.subprocess, "run") as run:
+            publisher.publish(self.root, "v0.1.0-rc.2", self.sha)
+        self.assertEqual(run.call_args_list[0].args[0],
+                         ["gh", "release", "upload", "v0.1.0-rc.2", str(assets[-1])])
+        self.assertEqual(download.call_args_list[0].args[2], assets[:-1])
+        self.assertEqual(download.call_count, 3)
+        self.assertFalse(any("--clobber" in call.args[0] for call in run.call_args_list))
 
     def test_rejects_missing_failed_or_wrong_mode_host_gate(self):
         original = copy.deepcopy(self.report)
@@ -197,6 +255,7 @@ class PrereleaseTests(unittest.TestCase):
 
     def test_never_promotes_draft_if_uploaded_bytes_fail(self):
         with patch.object(publisher.subprocess, "run") as run, \
+                patch.object(publisher, "release_metadata", return_value=None), \
                 patch.object(publisher, "verify_uploaded_assets", side_effect=ValueError("changed")):
             with self.assertRaisesRegex(ValueError, "changed"):
                 publisher.publish(self.root, "v0.1.0-rc.2", self.sha)

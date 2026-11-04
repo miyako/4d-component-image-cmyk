@@ -54,8 +54,8 @@ def resolve(root, *, event, ref_type="", ref_name="", version_tag="", event_sha=
         if head != event_sha or remote != event_sha + "\trefs/heads/main":
             raise ValueError("preflight checkout/event must match current origin/main")
         tag = validate_tag("v" + load_config(root, initialized=True)["version"])
-        if "-" not in tag[1:].split("+", 1)[0] or version_tag not in ("", tag):
-            raise ValueError("preflight requires the configured matching prerelease version")
+        if version_tag not in ("", tag):
+            raise ValueError("preflight requires the configured matching version")
         return {"tag": tag, "sha": event_sha}
     if event == "push":
         if ref_type != "tag":

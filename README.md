@@ -341,7 +341,52 @@ The unsigned artifact/evidence pair is
 `build/compile-status.json` for the actual revision, hashes, tools and results.
 No signing, notarization, publication or download/install success is implied.
 
-## Prospective signed macOS prerelease workflow
+## Bump and release
+
+After this workflow is merged, open **Actions > Bump and release > Run workflow**
+on `main`. Choose `major`, `minor`, `patch` or `promote`. **Dry run is enabled
+by default**: it builds a disposable, unpushed version candidate, executes the
+three native CLI targets and pinned 20.7 tool4d/compiler/package gates, then
+downloads and verifies that exact compiled ZIP in a separate job. It uses no
+signing secrets and changes no remote branch, tag or release.
+
+| Choice | Rule | From `0.1.0-rc.2` |
+| --- | --- | --- |
+| `major` | Increment major, reset minor/patch | `1.0.0` |
+| `minor` | Increment minor, reset patch | `0.2.0` |
+| `patch` | Increment the numeric patch | `0.1.1` |
+| `promote` | Remove prerelease/build metadata without changing the core | `0.1.0` |
+
+These choices produce stable versions and discard build metadata; `promote`
+rejects an already stable version. They do not increment an RC counter.
+`package.json.version` is authoritative, while `template.json`, native CLI
+version, host version assertions and the current class-documentation example
+must remain synchronized. Historical release facts are not rewritten.
+For a read-only local plan, run `python3 scripts/bump_release.py plan --bump promote`.
+
+Unchecking **Dry run** explicitly requests production signing and publication.
+Production dispatch is restricted to `main`. The workflow resolves one base
+snapshot and transports a deterministic version-only commit through a
+checksum-verified Git bundle; every target builds the same unpushed commit.
+Only after all native, compiler, exact-package, signature and Apple notarization
+gates pass does it atomically fast-forward `main` and create the matching tag.
+It then publishes the already tested assets directly, without relying on a
+`GITHUB_TOKEN` tag push to trigger another workflow.
+
+Runs are serialized. A moved `main`, conflicting tag, dirty checkout or branch
+protection rejection fails closed; no force push, protection bypass or existing
+asset overwrite is used. Candidate source and accepted artifacts are retained
+for 30 days. After a publication interruption, retry the failed publication job
+with its original candidate/assets, not a second version bump: resume accepts
+only the identical source, channel and asset hashes.
+
+New SemVer prereleases publish as `prerelease:true`, never Latest. Stable tags
+publish as `prerelease:false` and explicitly Latest; a hyphen in build metadata
+alone is not a prerelease. This feature does not alter the existing rc2 tag,
+assets or externally edited release flags. Workflow validation/merge is not
+permission to execute a production bump.
+
+## Signed macOS release workflow
 
 After the reviewed workflow is merged to `main`, manually dispatch **Actions >
 Release compiled component > Run workflow**, select `main`, set `preflight:true`
@@ -357,9 +402,9 @@ or publishing a release. It still requires the hosted 4D opt-in
 registered; registration is **not** evidence that Apple accepted a submission
 or that any signed run passed.
 
-The production flow will sign the macOS universal CLI and compiled native
-library, then produce a signed, notarized and stapled DMG separately from
-`CMYK.zip`. The ZIP will contain the identical component payload, but **a ZIP
+The production flow signs the macOS universal CLI and compiled native
+library, then produces a signed, notarized and stapled DMG separately from
+`CMYK.zip`. The ZIP contains the identical component payload, but **a ZIP
 cannot be stapled**; the stapled ticket belongs to the DMG. Windows binaries
 remain unsigned. Acceptance and native build manifests describe **presign**
 bytes; final distribution and signed-payload hashes belong to
@@ -379,12 +424,13 @@ exact diagnostic as a failed, non-applicable CLI probe, never as acceptance;
 any other rejection remains fatal. Direct online notarization and DMG Gatekeeper
 checks remain mandatory, not fallback successes.
 
-Only a completed successful preflight establishes the recorded gates. The candidate
-remains an experimental prerelease with partial acceptance and
-`release_ready:false`, even if signing subsequently passes. Publication is a
-separate explicitly approved operation using an existing matching prerelease
-tag, currently `v0.1.0-rc.2`; stable tags are rejected. Preflight creates no tag,
-and merging source changes alone is not permission to tag or publish.
+Only a completed successful preflight establishes the recorded gates. Evidence
+retains partial acceptance and `release_ready:false` because the automated
+harness does not establish full normal-application/cross-platform acceptance.
+The existing-tag release entrypoint accepts an already existing matching
+SemVer tag; the bump entrypoint above prepares a new version/tag only after
+its gates. Preflight creates no tag, and merging source changes alone is not
+permission to tag or publish. Signed `v0.1.0-rc.2` and unsigned rc1 remain intact.
 `CMYK.acceptance.json`, `CMYK.native-evidence.json` and `CMYK.signing.json`
 distinguish the presign observations from final signed-byte evidence.
 
