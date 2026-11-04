@@ -1,4 +1,4 @@
-# 4d-component-image-cmyk
+# CMYK
 
 A **real 4D component** for local, ICC-managed RGB/CMYK image conversion to
 CMYK TIFF or JPEG. Its C++17 executable, `image-cmyk`, uses Little CMS for color
@@ -14,7 +14,7 @@ See [current acceptance evidence](#release-candidate-evidence-2026-11-04).
 
 | Identity | Value |
 | --- | --- |
-| Repository / component / package | `miyako/4d-component-image-cmyk` / `4d-component-image-cmyk` |
+| Repository / component / package | `miyako/CMYK` / `CMYK` |
 | Host namespace / class | `cs.ImageCMYK.Converter` |
 | CLI / version / protocol | `image-cmyk` / `0.1.0` / `1` |
 | Implementation | C++17, CMake; statically built image/color dependencies |
@@ -26,9 +26,9 @@ executable; Windows resources contain `image-cmyk.exe`.
 
 ## 4D API
 
-See the full [Converter contract](component/4d-component-image-cmyk/Documentation/Classes/Converter.md)
-and generic [_CLI](component/4d-component-image-cmyk/Documentation/Classes/_CLI.md)
-and [_Process](component/4d-component-image-cmyk/Documentation/Classes/_Process.md)
+See the full [Converter contract](component/CMYK/Documentation/Classes/Converter.md)
+and generic [_CLI](component/CMYK/Documentation/Classes/_CLI.md)
+and [_Process](component/CMYK/Documentation/Classes/_Process.md)
 contracts. Component-internal code uses `cs.Converter`; host code uses the
 independent `ImageCMYK` namespace.
 
@@ -213,12 +213,15 @@ claim that the former example feature is still this component's API.
 
 ## Release-candidate evidence (2026-11-04)
 
-The first successful clean-host acceptance is
-[CI run 41776439377](https://github.com/miyako/4d-component-image-cmyk/actions/runs/41776439377)
+The predecessor package `4d-component-image-cmyk` first passed clean-host acceptance in
+[CI run 41776439377](https://github.com/miyako/CMYK/actions/runs/41776439377)
 at commit `d4d21e84e5d69f7b42a549c798363388365c8da7`, on hosted macOS 15 ARM64
-with tool4d **20.7 build 101905**. The latest accepted revision, artifact hash
-and run are recorded in [the draft PR](https://github.com/miyako/4d-component-image-cmyk/pull/1)
-and each artifact's adjacent acceptance JSON.
+with tool4d **20.7 build 101905**. Those historical artifacts do not validate the
+renamed `CMYK` package. The latest accepted `CMYK` revision, artifact hash and run
+are recorded in [the follow-up pull request](https://github.com/miyako/CMYK/pulls)
+and each new artifact's adjacent acceptance JSON. The migration preserves
+namespace `ImageCMYK`, class `Converter`, CLI `image-cmyk` and the existing catalog
+UUID; only the repository/component/package identity changes.
 The namespace is locally unique within this component;
 uniqueness among a host's future components cannot be proven here.
 
@@ -260,7 +263,7 @@ For an isolated hosted attempt without changing repository variables, dispatch
 `accept_4d`. From the CLI:
 
 ```sh
-gh workflow run ci.yml --ref miyako-cmyk-image-component -f accept_4d=true
+gh workflow run ci.yml --ref rename-cmyk-identity -f accept_4d=true
 ```
 
 This rebuilds all three native targets at the selected commit, then runs the
@@ -281,10 +284,10 @@ signing secret or release publication. Do not bundle tool4d.
 python3 scripts/ci_config.py download-tool4d --root .
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/compile_component.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
-python3 scripts/package_component.py --root . --repository miyako/4d-component-image-cmyk \
+python3 scripts/package_component.py --root . --repository miyako/CMYK \
   --tag v0.1.0 --unpack-test
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d \
-  --component build/release-test/4d-component-image-cmyk.4dbase
+  --component build/release-test/CMYK.4dbase
 ```
 
 Before assembly, obtain **all three native executable artifacts and manifests
@@ -301,8 +304,8 @@ artifact's evidence, not this README alone. The helper correctly reports
 `result:"partial"`, `finished:true`, `release_ready:false` after successful
 ARM64 acceptance; separate native CI provides Intel/Windows CLI evidence, not
 Intel/Windows 4D evidence. The unsigned artifact/evidence pair is
-`dist/4d-component-image-cmyk.zip` and adjacent
-`dist/4d-component-image-cmyk.acceptance.json`. Check `build/acceptance.json`,
+`dist/CMYK.zip` and adjacent
+`dist/CMYK.acceptance.json`. Check `build/acceptance.json`,
 `build/source-host-status.json`, `build/compiled-host-status.json` and
 `build/compile-status.json` for the actual revision, hashes, tools and results.
 No signing, notarization, publication or download/install success is implied.
@@ -310,9 +313,9 @@ No signing, notarization, publication or download/install success is implied.
 ## Installation after a validated release
 
 In the host Dependency manager, add GitHub repository
-`miyako/4d-component-image-cmyk` and a published matching version tag.
-The release asset must be `4d-component-image-cmyk.zip`. Dependency-manager
+`miyako/CMYK` and a published matching version tag.
+The release asset must be `CMYK.zip`. Dependency-manager
 GitHub support requires a compatible 4D release (20 R6 or later/current LTS).
 Alternatively, manually copy the unpacked
-`4d-component-image-cmyk.4dbase` into the host's `Components/` folder and reload.
+`CMYK.4dbase` into the host's `Components/` folder and reload.
 Manual local loading is not evidence of published dependency-manager install.

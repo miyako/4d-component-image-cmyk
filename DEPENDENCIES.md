@@ -26,7 +26,7 @@ The executable links the pinned static archives, not Homebrew/host-installed
 codec libraries.
 
 The original unmodified upstream license bytes are retained under
-`component/4d-component-image-cmyk/Resources/licenses/`. Its `provenance.json`
+`component/CMYK/Resources/licenses/`. Its `provenance.json`
 binds each notice to its source archive, version, license and SHA-256.
 Every native build checks these bytes against the verified source archives.
 For a deliberate dependency update, update the lock, review the new license

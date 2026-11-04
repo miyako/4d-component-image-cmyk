@@ -40,7 +40,7 @@ class DependencyTests(unittest.TestCase):
     def test_pins_and_distributed_notices(self):
         lock = json.loads((ROOT / "cli/dependencies.json").read_text())
         self.assertEqual(len(lock["dependencies"]), 6)
-        directory = ROOT / "component/4d-component-image-cmyk/Resources/licenses"
+        directory = ROOT / "component/CMYK/Resources/licenses"
         manifest = json.loads((directory / "provenance.json").read_text())
         pins = {entry["name"]: entry for entry in lock["dependencies"]}
         for notice in manifest["notices"]:
@@ -90,7 +90,7 @@ class DependencyTests(unittest.TestCase):
             shutil.copyfile(ROOT / "cli/dependencies.json", root / "cli/dependencies.json")
             component = root / "component"
             notices = component / "Resources/licenses"
-            shutil.copytree(ROOT / "component/4d-component-image-cmyk/Resources/licenses", notices)
+            shutil.copytree(ROOT / "component/CMYK/Resources/licenses", notices)
             validate_dependency_notices(root, component)
             manifest = json.loads((notices / "provenance.json").read_text())
             (notices / manifest["notices"][0]["path"]).write_text("modified")
