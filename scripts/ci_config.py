@@ -201,7 +201,8 @@ def resolve_tool_pin(root=ROOT, *, url=None, digest=None):
 
 def checked_tool_pin(url, digest):
     parsed = urllib.parse.urlsplit(url)
-    if (parsed.scheme != "https" or parsed.hostname != "resources-download.4d.com"
+    if (parsed.scheme != "https"
+            or parsed.hostname not in {"resources-download.4d.com", "product-download.4d.com"}
             or parsed.username or parsed.password or parsed.query or parsed.fragment
             or not re.fullmatch(r"[0-9a-fA-F]{64}", digest)):
         raise ValueError("official HTTPS tool4d URL and 64-hex SHA256 are required")
@@ -209,6 +210,31 @@ def checked_tool_pin(url, digest):
            PurePosixPath(urllib.parse.unquote(parsed.path)).parts):
         raise ValueError("tool4d URL must pin a concrete build, not latest")
     return url, digest.lower()
+
+
+def checked_tool_origin(url):
+    parsed = urllib.parse.urlsplit(url)
+    if (parsed.scheme != "https"
+            or parsed.hostname not in {"resources-download.4d.com", "product-download.4d.com", "builds2.4d.com"}
+            or parsed.port not in (None, 443) or parsed.username or parsed.password
+            or parsed.fragment):
+        raise ValueError("tool4D download redirected outside approved official HTTPS origins")
+
+
+class ToolRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        checked_tool_origin(new_url)
+        redirected = super().redirect_request(request, response, code, message, headers, new_url)
+        if redirected is not None:
+            for name in ("Authorization", "Proxy-Authorization", "Cookie"):
+                redirected.remove_header(name)
+        return redirected
+
+
+def open_tool_download(url):
+    checked_tool_origin(url)
+    opener = urllib.request.build_opener(ToolRedirectHandler())
+    return opener.open(url, timeout=120)
 
 
 def download_tool4d(root=ROOT, *, url=None, digest=None):
@@ -224,10 +250,8 @@ def download_tool4d(root=ROOT, *, url=None, digest=None):
         raise ValueError("tool4D download destination must not be a symlink")
     sha = hashlib.sha256()
     try:
-        with urllib.request.urlopen(url, timeout=120) as response, archive.open("wb") as output:
-            redirected = urllib.parse.urlsplit(response.geturl())
-            if redirected.scheme != "https" or redirected.hostname != "resources-download.4d.com":
-                raise ValueError("tool4D download redirected outside official HTTPS origin")
+        with open_tool_download(url) as response, archive.open("wb") as output:
+            checked_tool_origin(response.geturl())
             while chunk := response.read(1024 * 1024):
                 sha.update(chunk)
                 output.write(chunk)

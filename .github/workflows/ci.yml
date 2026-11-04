@@ -3,6 +3,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      accept_4d:
+        description: Run unsigned source/compile/packed-host acceptance with the default pinned free tool4d
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       source_sha:
@@ -70,11 +75,11 @@ jobs:
       - name: Select Rust 1.99.1
         if: matrix.language == 'rust'
         run: rustup default 1.99.1
-      - name: Selected CLI contract tests
-        run: python -m unittest discover -s tests -p test_cli.py -v
       - name: Native build and protocol smoke tests
         run: python scripts/build_cli.py --target "$CLI_TARGET" --language "$CLI_LANGUAGE"
         shell: bash
+      - name: Selected CLI integration tests
+        run: python -m unittest discover -s tests -p test_cli.py -v
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.target }}
@@ -118,28 +123,68 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Download pinned free tool4D for optional branch and PR integration tests
-        if: vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
+        if: (vars.FOURD_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.accept_4d)) && github.ref_type != 'tag' && !inputs.release_call
         env:
-          TOOL4D_URL: ${{ vars.TOOL4D_URL }}
-          TOOL4D_SHA256: ${{ vars.TOOL4D_SHA256 }}
+          TOOL4D_URL: ${{ !inputs.accept_4d && vars.TOOL4D_URL || '' }}
+          TOOL4D_SHA256: ${{ !inputs.accept_4d && vars.TOOL4D_SHA256 || '' }}
         run: python scripts/ci_config.py download-tool4d
-      - name: Test interpreted component from a real 4D host
-        if: vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
-        run: python scripts/test_4d.py --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
-      - name: Compile both 4D targets
-        if: vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
-        run: python scripts/compile_component.py --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
-      - name: Package and test the actual compiled component
-        if: vars.FOURD_ENABLED == 'true' && github.ref_type != 'tag' && !inputs.release_call
+      - name: Require source, compiler and exact unpacked compiled-host acceptance
+        id: acceptance
+        if: (vars.FOURD_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.accept_4d)) && github.ref_type != 'tag' && !inputs.release_call
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/accept_local.py --root . --repository "$GITHUB_REPOSITORY" \
+            --tool4d .tools/tool4d.app/Contents/MacOS/tool4d 2>&1 | tee build/4d-acceptance.log
+      - name: Capture one component-free shutdown probe after acceptance failure
+        if: failure() && steps.acceptance.outcome == 'failure'
         shell: python
         run: |
-          import os, subprocess, sys
-          sys.path.insert(0, "scripts")
-          from ci_config import ROOT, load_config
-          from package_component import package, unpack_for_test
-          config = load_config(initialized=True)
-          archive = package(ROOT, repository=os.environ["GITHUB_REPOSITORY"], tag="v" + config["version"])
-          component = unpack_for_test(ROOT, archive)
-          subprocess.run([sys.executable, "scripts/test_4d.py", "--tool4d",
-                          ".tools/tool4d.app/Contents/MacOS/tool4d",
-                          "--component", str(component)], check=True)
+          import json, pathlib, subprocess, sys
+          root = pathlib.Path("build/hosted-shutdown-probe")
+          project = root / "Project"
+          methods = project / "Sources/Methods"
+          methods.mkdir(parents=True)
+          (project / "Probe.4DProject").write_text(json.dumps({"compatibilityVersion": 2060}) + "\n")
+          marker = (root / "marker.json").resolve()
+          (methods / "Probe.4dm").write_text(
+              'var $parameter : Text\nvar $ignored : Integer\n'
+              '$ignored:=Get database parameter(User param value; $parameter)\n'
+              'File($parameter; fk posix path).setText("reached Return")\nreturn\n',
+              encoding="utf-8")
+          command = [str(pathlib.Path(".tools/tool4d.app/Contents/MacOS/tool4d").resolve()),
+                     str((project / "Probe.4DProject").resolve()), "--dataless",
+                     "--skip-onstartup", "--startup-method=Probe", "--user-param=" + str(marker)]
+          report = {"scope": "single component-free diagnostic; never acceptance"}
+          try:
+              result = subprocess.run(command, capture_output=True, timeout=60)
+              (root / "stdout.log").write_bytes(result.stdout)
+              (root / "stderr.log").write_bytes(result.stderr)
+              report.update(returncode=result.returncode, marker_written=marker.is_file(),
+                            status="passed" if result.returncode == 0 and marker.is_file() else "failed")
+          except subprocess.TimeoutExpired as error:
+              report.update(status="failed", reason="timeout")
+              (root / "stdout.log").write_bytes(error.stdout or b"")
+              (root / "stderr.log").write_bytes(error.stderr or b"")
+          (root / "result.json").write_text(json.dumps(report, indent=2) + "\n")
+          sys.exit(0 if report["status"] == "passed" else 1)
+      - name: Preserve 4D acceptance evidence, including failures
+        if: always() && steps.acceptance.outcome != 'skipped' && steps.acceptance.outcome != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: four-d-acceptance
+          path: |
+            dist/*.zip
+            dist/*.acceptance.json
+            build/acceptance.json
+            build/4d-acceptance.log
+            build/host-status.json
+            build/source-host-status.json
+            build/compiled-host-status.json
+            build/compile-status.json
+            build/macos-arm64/build-manifest.json
+            build/macos-x64/build-manifest.json
+            build/windows-x64/build-manifest.json
+            build/hosted-shutdown-probe/**
+          if-no-files-found: error
+          retention-days: 30

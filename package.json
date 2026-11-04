@@ -1,8 +1,8 @@
 {
-  "name": "4d-component-template",
+  "name": "4d-component-image-cmyk",
   "version": "0.1.0",
   "private": true,
-  "description": "Deterministic UTF-8 greeting example",
+  "description": "ICC-managed RGB/CMYK image conversion using Little CMS, JPEG, PNG and TIFF",
   "license": "MIT",
   "tool": {
     "platform": "macos",

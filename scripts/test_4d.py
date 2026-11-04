@@ -218,17 +218,24 @@ def test_4d(root, tool4d, component=None):
         executable.chmod(0o755)
         request = host / (_host_path_prefix("host request") + ".json")
         staged_output = host / (_host_path_prefix("host status") + ".json")
+        fixtures = root / "tests" / "fixtures"
+        _no_symlinks(fixtures)
+        fixture_directory = host / _host_path_prefix("image fixtures")
+        shutil.copytree(fixtures, fixture_directory)
         request.write_text(json.dumps({"status": str(staged_output),
                                       "expectCompiled": component is not None,
-                                      "executable": str(executable)}, ensure_ascii=False) + "\n",
+                                      "executable": str(executable),
+                                      "fixtureDirectory": str(fixture_directory)}, ensure_ascii=False) + "\n",
                            encoding="utf-8")
-        subprocess.run([str(Path(tool4d).resolve()), str(host / "Project" / "Host.4DProject"),
+        process = subprocess.run([str(Path(tool4d).resolve()), str(host / "Project" / "Host.4DProject"),
                         "--skip-onstartup", "--startup-method=Smoke", "--dataless",
-                        "--user-param=" + str(request)], check=True, timeout=120)
+                        "--user-param=" + str(request)], check=False, timeout=120)
         _no_symlinks(staged_output, recursive=False)
+        if staged_output.is_file() and not staged_output.is_symlink():
+            output.write_bytes(staged_output.read_bytes())
+        process.check_returncode()
         if not staged_output.is_file() or staged_output.is_symlink():
             raise ValueError("tool4d did not write host-status.json; host execution is unverified")
-        output.write_bytes(staged_output.read_bytes())
         status = _read_json(output)
         return validate_status(status, contract, component is not None)
     finally:

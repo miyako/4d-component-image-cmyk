@@ -479,7 +479,7 @@ class DeliveryTests(unittest.TestCase):
             "TOOL4D_SHA256": digest or hashlib.sha256(data).hexdigest(),
         }
         with patch.dict(os.environ, environment, clear=True), patch.object(
-                ci_config.urllib.request, "urlopen", return_value=response):
+                ci_config, "open_tool_download", return_value=response):
             return ci_config.download_tool4d(self.root)
 
     def test_verified_tool4d_download_and_permissions(self):
@@ -549,6 +549,33 @@ class DeliveryTests(unittest.TestCase):
                                      "TOOL4D_SHA256": "0" * 64}, clear=True):
             with self.assertRaisesRegex(ValueError, "concrete build"):
                 ci_config.download_tool4d(self.root)
+
+    def test_exact_official_redirect_hosts(self):
+        for host in ("resources-download.4d.com", "product-download.4d.com", "builds2.4d.com"):
+            ci_config.checked_tool_origin("https://" + host + "/fixed?signature=temporary")
+        for url in (
+            "http://builds2.4d.com/fixed", "https://builds2.4d.com.evil.example/fixed",
+            "https://evilbuilds2.4d.com/fixed", "https://builds2.4d.com:444/fixed",
+            "https://user:password@builds2.4d.com/fixed", "https://example.com/fixed",
+            "https://product-download.4d.com.evil.example/fixed",
+        ):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                ci_config.checked_tool_origin(url)
+        url = "https://product-download.4d.com/release/21.x/21.0/100301/mac/tool4d_arm64.tar.xz"
+        self.assertEqual(ci_config.checked_tool_pin(url, "a" * 64), (url, "a" * 64))
+
+    def test_redirect_checks_each_hop_and_removes_credentials(self):
+        handler = ci_config.ToolRedirectHandler()
+        request = ci_config.urllib.request.Request(
+            "https://resources-download.4d.com/fixed",
+            headers={"Authorization": "private", "Cookie": "private"})
+        redirected = handler.redirect_request(
+            request, None, 302, "Found", {}, "https://builds2.4d.com/fixed?signature=temporary")
+        self.assertIsNone(redirected.get_header("Authorization"))
+        self.assertIsNone(redirected.get_header("Cookie"))
+        with self.assertRaises(ValueError):
+            handler.redirect_request(
+                redirected, None, 302, "Found", {}, "http://resources-download.4d.com/fixed")
 
 
 if __name__ == "__main__":

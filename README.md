@@ -1,474 +1,318 @@
-# 4D CLI component template
+# 4d-component-image-cmyk
 
-An agent-ready **real 4D component project** wrapping a native CLI on macOS and
-Windows. Choose **Go, Rust or C++**; initialization keeps only that starter.
-The working greeting example uses the same deterministic UTF-8 JSON protocol in
-each language. Replace the example with your feature, not the generic adapter.
+A **real 4D component** for local, ICC-managed RGB/CMYK image conversion to
+CMYK TIFF or JPEG. Its C++17 executable, `image-cmyk`, uses Little CMS for color
+transforms and libpng, libjpeg-turbo and libtiff for image I/O. It is not a native
+4D plug-in, an image uploader or a naive RGB-to-CMYK channel inversion.
 
-## Start here: THINK / ASK → RUN
+**Draft release candidate, not fully cross-platform accepted.** Native CLI tests
+pass on all three targets. Source and compiled-component host acceptance pass on
+hosted macOS 15 ARM64 with the unchanged pinned tool4d 20.7; an unsigned compiled
+ZIP is available as a CI artifact. Intel/Windows 4D and published installation
+remain unvalidated; no release has been published.
+See [current acceptance evidence](#release-candidate-evidence-2026-11-04).
 
-Read [AGENTS.md](AGENTS.md), the canonical detailed implementation/acceptance
-playbook. Resolve exact GitHub identity/case, one language, an independent unique
-namespace, CLI basename and feature semantics **before** initialization.
-Do not initialize the original template repository; check its actual remote
-using the playbook's identity rules.
-
-For Copilot, the short [.github/copilot-instructions.md](.github/copilot-instructions.md)
-points to that guide; the task-specific
-[4d-cli-component skill](.github/skills/4d-cli-component/SKILL.md) uses the
-[official project skill convention](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills).
-Supported clients select relevant skills, but file presence does not guarantee
-session discovery/invocation. In Copilot CLI, `/skills reload` and
-`/skills info 4d-cli-component` inspect discovery; these are slash commands, not
-shell commands. Read the playbook directly if the client does not load the skill.
-
-The playbook includes a [November 1, 2026 UUIDv7 adoption case study](AGENTS.md#uuid-adoption-case-study--november-1-2026)
-with real source/compiled host validation and explicit limitations.
-
-## Use this template
-
-Click **Use this template → Create a new repository**, then prompt your agent:
-
-> Implement a 4D component in this repository that [FEATURE]. Use [Go/Rust/C++],
-> unique class namespace [NAMESPACE], CLI basename [CLI_NAME], and these
-> constraints: [DEPENDENCIES, LICENSE, LIMITS, ERROR BEHAVIOR]. Follow AGENTS.md,
-> initialize the exact destination repository name, implement the feature and
-> its host API/docs/tests, and deliver a compiled component release. Report
-> unvalidated platforms and required setup honestly.
-
-For a local package rather than publication, say so explicitly. Unsigned local
-free tool4d acceptance needs no signing secret, license activation, tag/release
-or repository settings. Partial local validation is **NOT release ready**.
-
-```sh
-python3 scripts/initialize.py --repository hello-tools --namespace AcmeHello \
-  --cli hello-cli --language go --feature "The requested feature"
-```
-
-The repository argument is the **exact new GitHub repository basename**, not
-`owner/name`, the worktree name or this template's original name. Validation
-allows ASCII letters/digits/`_`/`-` up to 80 characters, namespace identifiers
-up to 31 characters, and lowercase CLI letters/digits/`-` up to 63 characters.
-Namespace uniqueness across a host's components is the user's responsibility.
-
-Initialization renames the component root, project, catalog name/UUID, XML
-namespace, CLI identity/manifests, class docs, README samples, host fixtures and
-package metadata. Workflows derive paths/asset names from `template.json`.
-It stages/validates replacements first, preserves binary icons and keeps only
-the selected `cli/`. Identical reruns are unchanged; conflicting reconfiguration
-requires a fresh template. **The feature description is recorded, not automatically
-implemented.** Read [AGENTS.md](AGENTS.md) for the end-to-end agent workflow.
-
-After initialization, optional `scripts/rename_feature.py --root . --class NAME`
-rewrites only the known Greeting identity/configuration registry. It does **not**
-implement the new API or protocol. Follow the playbook's full replacement
-inventory, including build smoke tests, host assertions and completion metadata.
-
-The uninitialized template is **not releasable** and normal template CI does not
-install three unrelated language toolchains.
-
-## Requirements and specifications
-
-| Surface | Specification |
+| Identity | Value |
 | --- | --- |
-| 4D source | Project compatibilityVersion 2060; 4D 20.7 LTS tool4d used locally |
-| Host installation | Dependency manager GitHub support: 20 R6 or later / compatible current LTS; confirm your release |
-| macOS CLI | macOS 12+ with pinned Go 1.26; Rust/C++ deploy to 11+; universal x86_64 + arm64; follow your 4D host's requirements |
-| Windows CLI | x64, hosted Windows Server 2022; explicitly select `Windows-x64` in the API |
-| Windows ARM64 | No native CLI artifact or verified native 4D compiler target; x64 emulation is not a supported/tested promise |
-| Go | CI 1.26.10 (source minimum 1.23), stdlib only, CGO disabled |
-| Rust | CI 1.99.1, edition 2021, std only |
-| C++ | C++17/CMake, hosted Xcode/MSVC, static Windows CRT |
-| Python | 3.10+ locally, CI 3.12 |
+| Repository / component / package | `miyako/4d-component-image-cmyk` / `4d-component-image-cmyk` |
+| Host namespace / class | `cs.ImageCMYK.Converter` |
+| CLI / version / protocol | `image-cmyk` / `0.1.0` / `1` |
+| Implementation | C++17, CMake; statically built image/color dependencies |
+| Native targets | macOS x86_64, macOS arm64, Windows x64 |
 
-Only the selected language is built. Pins are a starting point, not a security
-support promise: update deliberately and repeat checks. GitHub services runner
-images/Xcode/MSVC, so compiler patch versions are not immutable.
-`package.json` is name/version metadata, not a Node application.
+Target support is not evidence that a particular revision has passed native
+tests. Windows ARM64 is unsupported. macOS resources contain a universal
+executable; Windows resources contain `image-cmyk.exe`.
 
-## Architecture and exposed API
+## 4D API
 
-```text
-template.json                         initialization/release identity
-cli/                                  one selected language implementation
-component/<repository>/
-  Project/<repository>.4DProject       real 4D anchor
-  Project/Sources/Classes/
-    _CLI.4dm                          generic resource resolver
-    _Process.4dm                      generic quoting/execution/status adapter
-    Greeting.4dm                      replaceable feature API
-  Project/Sources/Methods/_CaptureError.4dm
-  Documentation/Classes/*.md           class contracts
-  Resources/logo.png + logo.svg        original icon/reference wrapper
-  Resources/bin/macOS/<cli>            assembled universal executable
-  Resources/bin/Windows/<cli>.exe      x64 executable
-tooling/compiler/                     real Compile project driver
-tests/host/                           namespaced host runtime fixture
-tests/host/contract.json              feature/execution host assertion registry
-tests/cli-contract.json               configurable native CLI smoke vectors
-scripts/                              initialize/build/compile/package/test
-```
-
-The **component/project/catalog/package/release ZIP name MUST equal the repository
-basename** for dependency-manager releases. Namespace is independent:
-`settings.4DSettings` is XML with
-`<general component_classStore_name="TemplateCLI"/>`.
-Host code uses `cs.TemplateCLI.Greeting`; internal code uses `cs.Greeting`.
-4D shares classes through the namespace: underscores are internal **by
-convention**, not private access or an exported-class manifest.
-
-Class docs:
-[Greeting](component/4d-component-template/Documentation/Classes/Greeting.md),
-[_CLI](component/4d-component-template/Documentation/Classes/_CLI.md),
-[_Process](component/4d-component-template/Documentation/Classes/_Process.md).
-The actual compiler generates `Resources/en.lproj/syntaxEN.json`, preventing
-stale completion metadata.
-
-### Working host sample
-
-After installation, use your initialized namespace:
+See the full [Converter contract](component/4d-component-image-cmyk/Documentation/Classes/Converter.md)
+and generic [_CLI](component/4d-component-image-cmyk/Documentation/Classes/_CLI.md)
+and [_Process](component/4d-component-image-cmyk/Documentation/Classes/_Process.md)
+contracts. Component-internal code uses `cs.Converter`; host code uses the
+independent `ImageCMYK` namespace.
 
 ```4d
-var $tool : cs.TemplateCLI.Greeting
-var $result : Object
+var $tool : cs.ImageCMYK.Converter
+var $source; $destination; $profile : 4D.File
+var $result; $options : Object
 var $target : Text
 $target:="macOS-universal"
 If (Is Windows)
   $target:="Windows-x64"
 End if
-$tool:=cs.TemplateCLI.Greeting.new($target)
-$result:=$tool.greet("4D")
+$tool:=cs.ImageCMYK.Converter.new($target)
+$source:=Folder(fk desktop folder).file("tagged-input.png")
+$destination:=Folder(fk desktop folder).file("output-cmyk.tif")
+$profile:=Folder(fk desktop folder).file("printer.icc")
+$options:=New object("destinationProfile"; $profile; "intent"; "relativeColorimetric")
+$result:=$tool.convertFile($source; $destination; $options)
 If ($result.ok)
-  ALERT($result.value.message)  // Hello, 4D!
+  $result:=$tool.inspectFile($destination)
+  If ($result.ok)
+    ALERT($result.value.colorSpace)  // CMYK
+  End if
 Else
   ALERT($result.error.code+": "+$result.error.message)
 End if
 ```
 
-Calls are synchronous with a 30-second process timeout. Success preserves
-`{ok:true,stdout,stderr,exitCode:0,value}`. Failure has `ok:false`,
-`error:{code,message{,details}}`; process output/status are retained when
-available, while prelaunch errors do not invent an exit code.
-Missing executable, unsupported target/platform, invalid argument, launch
-failure, abnormal termination, nonzero CLI status and malformed protocol are
-explicit. Nonempty stderr alone is not failure. No PATH fallback, runtime
-download, unchecked chmod or global host error handler.
+`inspectFile(file)` returns dimensions, channels, model, bit depth, format,
+orientation, DPI and embedded profile information. `convertFile(source;
+destination; options)` performs the transform. `version()` returns the CLI
+version. Parameters are actual `4D.File` objects, not Text paths. Calls are
+synchronous, close stdin, and have a finite **30-second timeout**. There is no
+shared conversion state or asynchronous job queue; do not concurrently target
+the same destination.
 
-### CLI contract
+Success is `{ok:true,stdout,stderr,exitCode:0,value}`. Failures are
+`{ok:false,error:{code,message}}`, with available process streams/status and
+diagnostic details retained. The wrapper distinguishes argument, resource,
+launch, process, nonzero CLI and malformed-protocol failures. A native nonzero
+status is reported as `cli_error`; its JSON stderr contains the native code and
+message. Prelaunch failures do not invent an exit code. Nonempty stderr alone
+is not failure. There is no PATH fallback, shell, runtime download or chmod.
 
-UTF-8, exactly one JSON line, LF on both systems, protocol version 1:
+## Image and profile contract
 
-| Invocation | Status / stdout / stderr |
-| --- | --- |
-| `hello-cli greet --name "4D"` | 0 / `{"protocol":1,"message":"Hello, 4D!"}` + LF / empty |
-| `hello-cli --version` | 0 / `{"protocol":1,"version":"0.1.0"}` + LF / empty |
-| Invalid/unknown/missing/duplicate args, empty or malformed UTF-8 name | 2 / empty / error JSON below + LF |
+* Input: **8-bit RGB PNG**, **8-bit RGB or CMYK JPEG/TIFF**. Output:
+  **8-bit, four-channel CMYK TIFF/JPEG**, no alpha.
+* PNG must be non-interlaced and non-animated. TIFF is classic (not BigTIFF),
+  single-page, stripped (not tiled), contiguous unsigned 8-bit RGB or
+  four-ink CMYK without extra samples or sub-IFDs. Unsupported compression
+  codecs fail explicitly; see [dependency build restrictions](DEPENDENCIES.md).
+* Alpha, grayscale, unsupported bit depths and orientations other than
+  top-left (`1`) are rejected rather than silently flattened, quantized or
+  rotated. This is not a general-purpose document/multipage image editor.
+* A valid **CMYK destination ICC profile is required** and is embedded in the
+  output. Supply a licensed profile appropriate to the actual print process.
+* An embedded source profile is used by default. `sourceProfile` is only for
+  untagged input: it must match the source model and cannot override tagged
+  input. Profile mismatches and malformed profiles fail.
+* Untagged input is rejected by default. `allowAssumeSRGB:true` explicitly
+  permits sRGB for untagged **RGB only**, with a warning in the result. Untagged
+  CMYK always needs a suitable supplied CMYK profile.
+* Existing destinations are not overwritten and sources are not modified.
+  The selected format, not the destination extension, controls encoding.
+* Input is bounded to **256 MiB**, ICC profiles to **32 MiB**, images to
+  **40 million pixels**, and decoded pixel storage to **256 MiB**. These limits
+  do not promise a 30-second completion time for every permitted input.
+* Dimensions and supported DPI metadata are carried through conversion.
+  Arbitrary EXIF, XMP, text and application-specific metadata preservation is
+  not promised. JPEG is lossy; pixel equality is not a JPEG round-trip promise.
+  Staging files are removed on handled failures. A forced OS termination or
+  process timeout can leave a private `.image-cmyk-*.partial` file in the
+  destination directory; it is not the published output and can be removed
+  after confirming the corresponding process has exited.
 
-```json
-{"protocol":1,"error":{"code":"invalid_arguments","message":"expected greet --name <non-empty UTF-8 name> or --version"}}
+Conversion options:
+
+| 4D option | CLI option | Default / values |
+| --- | --- | --- |
+| `destinationProfile` | `--destination-profile` | Required CMYK ICC File/path |
+| `sourceProfile` | `--source-profile` | Optional untagged-source ICC File/path |
+| `allowAssumeSRGB` | `--allow-assume-srgb` | `false`; `true` or `false` |
+| `intent` | `--intent` | `relativeColorimetric`; also `perceptual`, `saturation`, `absoluteColorimetric` |
+| `blackPointCompensation` | `--black-point-compensation` | `true`; `true` or `false` |
+| `format` | `--format` | `tiff`; `tiff` or `jpeg` |
+| `quality` | `--quality` | `90`; integer `1..100`, affects JPEG, not TIFF |
+
+The generated test CMYK ICC fixture is deterministic transform plumbing,
+**not a characterized press profile**. Its test results make no printing-quality
+or colorimetric-accuracy claim for a physical device.
+
+## CLI protocol
+
+```text
+image-cmyk --version
+image-cmyk inspect --source PATH
+image-cmyk convert --source PATH --destination PATH --destination-profile PATH
+  [--source-profile PATH] [--allow-assume-srgb true|false]
+  [--intent relativeColorimetric|perceptual|saturation|absoluteColorimetric]
+  [--black-point-compensation true|false] [--format tiff|jpeg] [--quality N]
 ```
 
-No shell is used. `4D.SystemWorker.new` takes **command-line Text**, not argv
-Collection. Each literal argument/path is quoted; File/Folder virtual Resources
-paths are expanded with actual 4D APIs. stdin closes immediately. UTF-8 names,
-spaces, quotes, backslashes, newlines and metacharacters are data. Windows CRT
-and 4D macOS parsing require real native round-trip checks, not shell tests.
-Add an explicit Blob mode if your future feature returns binary output.
-
-## Install after release
-
-In the host's Dependency manager add **GitHub** dependency `OWNER/REPOSITORY`
-and choose the released tag/version. The asset must be exactly `REPOSITORY.zip`.
-Alternatively declare in the host's `Project/Sources/dependencies.json`:
+Each result is exactly one UTF-8 JSON object plus LF. Success exits `0`, writes
+stdout and leaves stderr empty. Version returns
+`{"protocol":1,"version":"0.1.0"}`. Inspection includes:
 
 ```json
 {
-  "version": 2100,
-  "dependencies": {
-    "hello-tools": {"github": "OWNER/hello-tools", "tag": "v0.1.0"}
-  }
+  "protocol": 1,
+  "width": 8,
+  "height": 6,
+  "channels": 3,
+  "colorSpace": "RGB",
+  "bitDepth": 8,
+  "alpha": false,
+  "format": "png",
+  "orientation": 1,
+  "dpiX": 0,
+  "dpiY": 0,
+  "embeddedProfile": {"present": false}
 }
 ```
 
-Reload the host and use your namespace. Manual installation: unzip and copy
-`REPOSITORY.4dbase` into the host's `Components/` folder.
-Local source dependencies point at the component package root, not the anchor.
-`tests/host/environment4d.json` documents this mapping; automated runtime checks
-install an isolated copy under `Components/` to test actual component loading.
+Dimensions/DPI above are illustrative, not fixed fixture expectations. A present
+profile includes its color space and native metadata. Conversion includes
+`protocol`, dimensions, `channels:4`, `colorSpace:"CMYK"`, output `format`,
+`sourceProfile`, `destinationProfile` and a Text-array `warnings`.
 
-## Build, validate and release
+Errors exit **2**, leave stdout empty and write one stderr object:
 
-For read-only JSON configuration/platform/tool inspection and local orchestration:
+```json
+{"protocol":1,"error":{"code":"invalid_arguments","message":"missing --source"}}
+```
+
+Invalid, missing, duplicate and unknown options are errors, not ignored
+configuration. Messages may depend on the failing operation. The 4D adapter
+quotes literal paths into SystemWorker command-line Text without invoking a
+shell; spaces, Unicode and OS-valid quotes are data. CLI subprocess tests do
+not establish 4D's native quoting behavior; real host tests remain required.
+
+## Build and tests
+
+Read [AGENTS.md](AGENTS.md) before modifying identity, process execution,
+packaging or acceptance tooling. This repository is already initialized:
+do not rerun initialization to change its identity.
+
+Dependencies, versions, source URLs and SHA256 pins are in
+[`cli/dependencies.json`](cli/dependencies.json). See
+[native dependency provenance and licenses](DEPENDENCIES.md) for verified notice
+generation, static build restrictions and the official tool4d redirect policy.
+The build uses pinned upstream
+sources, not Homebrew/Pillow or an arbitrary system image library. Required
+redistribution notices belong in component `Resources/licenses/`; the MIT
+scaffold license does not replace dependency licenses or ICC profile licenses.
+Build prerequisites are Python 3.10+, CMake and a C++17 compiler (Xcode/Clang
+on macOS, MSVC on Windows). Windows builds use a static CRT. Compiler patch
+versions must be reported from the actual build, not inferred from a CI image.
 
 ```sh
 python3 scripts/doctor.py --root .
-python3 scripts/doctor.py --root . --tool4d /path/to/tool4d
-python3 scripts/accept_local.py --root . --repository OWNER/REPOSITORY \
-  --tool4d /path/to/tool4d
-```
-
-Read the scripts' `--help` and [AGENTS.md](AGENTS.md) for prerequisites/stages.
-`accept_local.py` invokes existing builds/assembly/source-host/compile/pack and
-compiled-host checks, records `build/acceptance.json` and, when packing succeeds,
-produces `dist/REPOSITORY.zip`. Optional `--cross` produces nonnative **Go-only**
-artifacts; Rust/C++ cross mode is explicitly unsupported. Cross-building is not
-native execution evidence. Report `not_run` separately from `passed`: even a
-successful Apple Silicon compiled-host run is not full release readiness.
-With `--cross` on Apple Silicon, Intel CLI vectors may also run through available
-Rosetta, recorded separately from native execution. Report the actual local
-toolchain (Go 1.25.1 observed), not the CI pin (Go 1.26.10).
-
-For **Go on native macOS**, the explicit three-target artifact example is:
-
-```sh
-python3 scripts/accept_local.py --root . --repository OWNER/REPOSITORY \
-  --tool4d /path/to/tool4d --cross
-```
-
-Without `--cross`, assembly still needs current artifacts and
-`build-manifest.json` files for **all three targets**. For Rust/C++, restore
-executables/manifests from same-commit native CI into `build/<target>/`; unsupported
-cross mode is not a substitute. Manifests bind source/config/package inputs,
-Git commit and binary hash; assembly rejects missing/stale/mixed artifacts.
-Acceptance uses strict `passed` / `failed` / `not_run` statuses and separate
-CLI build, native CLI test and Rosetta steps. Source/compiled host evidence is
-preserved in `build/source-host-status.json` and `build/compiled-host-status.json`,
-alongside `build/compile-status.json` and `build/acceptance.json`.
-Successful local completion still reports `result:"partial"`,
-`finished:true`, `release_ready:false`; failures save unfinished failed evidence.
-macOS system-library checks do not inspect Windows native DLL/runtime dependencies.
-The stable final pair is `dist/REPOSITORY.zip` and
-`dist/REPOSITORY.acceptance.json` (ZIP SHA256, actual tool versions and embedded
-host evidence). Copy both before disposing of a temporary worktree. The latest
-attempt, including failures, remains in `build/acceptance.json`.
-
-```sh
+python3 scripts/build_cli.py --root . --target macos-arm64
+python3 -m unittest discover -s tests -p test_cli.py -v
 python3 -m unittest discover -s tests -v
 python3 scripts/generate_icons.py --check
-python3 scripts/build_cli.py --target macos-arm64
 ```
 
-Use your native target: `macos-x64`, `macos-arm64`, `windows-x64`.
-CI builds/tests only the selected language in native hosted jobs, uploads
-same-commit binaries and combines macOS slices using `lipo`.
-CI executable artifacts are **not compiled component releases**.
-The correct architecture verification order is
-`lipo <universal-file> -verify_arch x86_64 arm64`; do not put the filename after
-the architecture list or mix resources from different source revisions.
+Choose the **native** target: `macos-arm64`, `macos-x64` or `windows-x64`.
+C++ cross mode is unsupported. `build_cli.py` builds native CTest checks and
+CLI smoke vectors. CTest independently compares transform pixels with direct
+Little CMS reference calls; Python tests exercise the built executable's
+protocol, files, options and path handling without installing Pillow.
+Python integration expects `build/<target>/image-cmyk[.exe]` and the native
+fixture generator under `build/<target>/cmake/` (or its Windows `Release/`
+directory). It detects the native target using the build script;
+`CLI_TARGET`, if set, must match that native target.
+It does not rebuild a copied starter or silently skip a missing
+selected C++ executable. `TEST_CLI_LANGUAGE=none` explicitly skips native CLI
+execution for infrastructure-only checks; a skip is **not** feature acceptance.
+The retained infrastructure suites validate packaging/process tooling, not a
+claim that the former example feature is still this component's API.
 
-### Real 4D tooling and configuration
+## Release-candidate evidence (2026-11-04)
 
-[tool4d](https://developer.4d.com/docs/20/Admin/cli#tool4d) is the official **free
-standalone headless tool** used by the reference component pipelines. This flow
-does not require a license/serial secret. Full IDE, Server and merged applications
-have separate vendor licensing. Never bundle tool4d into the MIT component.
+The first successful clean-host acceptance is
+[CI run 41776439377](https://github.com/miyako/4d-component-image-cmyk/actions/runs/41776439377)
+at commit `d4d21e84e5d69f7b42a549c798363388365c8da7`, on hosted macOS 15 ARM64
+with tool4d **20.7 build 101905**. The latest accepted revision, artifact hash
+and run are recorded in [the draft PR](https://github.com/miyako/4d-component-image-cmyk/pull/1)
+and each artifact's adjacent acceptance JSON.
+The namespace is locally unique within this component;
+uniqueness among a host's future components cannot be proven here.
 
-Hosted configuration belongs in the **generated repository** under
-**Settings → Secrets and variables → Actions → Variables → New repository variable**,
-separate from the seven private secrets documented below. Template creation
-does not inherit these variables. Only the hosted 4D opt-in is required; the
-approved public compiler pin is already in `package.json.tool`.
+| Check | Status | Observed evidence / limitation |
+| --- | --- | --- |
+| Native ARM64/Intel/Windows x64 CLI | `passed` | Three native CI jobs, 131 native assertions and 14 Python CLI integration tests per target; independent Little CMS reference pixel equality |
+| Codec runtime closure and resource assembly | `passed` | Static codecs; allowlisted system imports; Windows DLL/static-CRT audit; universal macOS plus Windows resources from same-revision manifests |
+| Source-host process and feature assertions | `passed` on hosted ARM64 | Clean process exit, actual `cs.ImageCMYK.Converter` calls, 11 feature cases and full generic/negative contract |
+| 4D compilation acceptance | `passed` on hosted ARM64 | Fresh success/empty diagnostics, both targets, real CompiledCode/Libraries and input/output digest marker |
+| Source-stripped ZIP / unpacked compiled host | `passed` on hosted ARM64 | Exact final ZIP loaded; 11 cases and full contract pass with compiled mode true |
+| Earlier local macOS 26.7 runtime | `failed` locally | Shutdown SIGSEGV even in a component-free project; not waived or relabeled as success |
+| Intel/Windows 4D, published dependency installation, signing | `not_run` | No native runtime, publication or signing claim |
 
-| Variable | Value |
-| --- | --- |
-| `FOURD_ENABLED` | `true` to enable vendor tool download/use; mandatory for release |
-| `TOOL4D_URL` | Optional paired override: `https://resources-download.4d.com/release/20.x/20.7/101905/mac/tool4d_arm64.tar.xz` (observed macOS ARM64 build) |
-| `TOOL4D_SHA256` | Optional paired override: `40a5d177a4f73165f52abf6ec8000249d81411c41353ccf258cece8e74639261`; verify the approved archive hash out of band |
+The earlier local environment was macOS 26.7 ARM64, Python 3.12.12,
+CMake 4.4.3 and Apple Clang 21.0.0. Its shutdown defect was reproduced in a
+minimal component-free project using
+both explicit `QUIT 4D` and the documented automatic shutdown after `return`.
+An independently approved diagnostic tool4d **21.0 build 100301** ARM64 pin also
+crashes on the minimal `return` probe. The default compiler remains **20.7**;
+the diagnostic download does not change the supported runtime baseline.
+The clean hosted environment passes with the same pinned 20.7 binary without
+accepting signal exits, weakening gates or changing the runtime baseline.
 
-Supply URL/hash overrides together or neither; incomplete pairs fail.
-GitHub automatically supplies `GITHUB_TOKEN`, and only the publish job receives
-`contents: write`. Do not register it or a personal token as another secret.
-None of these variables or the automatic token enables signing.
+Reproducible commands include the native build and test commands above and the
+real 4D commands below. Raw local reports/logs are under `build/`, including
+`host-status.json`, `compile-status.json`, `source-host.log`, `compile.log`,
+and `shutdown-probe/result{,-return,-return21}.json`. A successful JSON report
+from a crashed process is **not** a passed acceptance check.
 
-Reference URL form:
-`https://resources-download.4d.com/release/20.x/20.7/BUILD/mac/tool4d_arm64.tar.xz`.
-`latest` is discovery-only/mutable and rejected by the downloader; checksum
-mismatch fails. The fixed **20.7 build 101905** archive was downloaded and used
-locally, SHA256
-`40a5d177a4f73165f52abf6ec8000249d81411c41353ccf258cece8e74639261`.
-The pin is public versioned metadata in `package.json.tool`, not a credential.
-This archive is macOS ARM64 only, not a native Intel/Windows runtime.
-Local download checks native host compatibility plus safe extraction:
+The compiled candidate is unsigned and available for review/testing, not a
+published release. Intel/Windows 4D acceptance and actual published installation
+remain separate checks. Any proposed compiler-baseline change requires a
+separate explicit decision.
+
+### Real source and compiled 4D acceptance
+
+For an isolated hosted attempt without changing repository variables, dispatch
+**Actions > CI > Run workflow**, select the implementation branch and enable
+`accept_4d`. From the CLI:
 
 ```sh
-python3 scripts/ci_config.py download-tool4d
+gh workflow run ci.yml --ref miyako-cmyk-image-component -f accept_4d=true
 ```
 
-No URL/hash variables are needed for that default. A complete explicit CLI pair
-overrides a complete environment-variable pair, which overrides the manifest.
-For an approved alternate pin only:
+This rebuilds all three native targets at the selected commit, then runs the
+existing strict acceptance helper on hosted macOS 15 ARM64. The explicit opt-in
+uses the default `package.json.tool` checksum pin, not repository URL overrides.
+It uploads `four-d-acceptance` containing reports/logs even on failure, and the
+ZIP plus adjacent evidence JSON only if packaging reaches those stages.
+No tag, publication, signing or persistent `FOURD_ENABLED` change is performed.
+A failed process remains a failed job; a single component-free shutdown probe
+is retained after acceptance failure. The helper's `release_ready:false` and
+untested Intel/Windows 4D/install/signing checks must not be relabeled as passed.
+
+The pinned free tool4d in `package.json.tool` is **20.7 build 101905,
+macOS ARM64**. Unsigned local component compilation needs no license activation,
+signing secret or release publication. Do not bundle tool4d.
 
 ```sh
-python3 scripts/ci_config.py download-tool4d --root . \
-  --url https://resources-download.4d.com/release/20.x/20.7/101905/mac/tool4d_arm64.tar.xz \
-  --sha256 40a5d177a4f73165f52abf6ec8000249d81411c41353ccf258cece8e74639261
-```
-
-No imagined setup action or unpinned external compiler is used.
-
-```sh
-python3 scripts/test_4d.py --tool4d /path/to/tool4d
-python3 scripts/compile_component.py --tool4d /path/to/tool4d
-python3 scripts/package_component.py --repository OWNER/REPOSITORY \
+python3 scripts/ci_config.py download-tool4d --root .
+python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
+python3 scripts/compile_component.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
+python3 scripts/package_component.py --root . --repository miyako/4d-component-image-cmyk \
   --tag v0.1.0 --unpack-test
-python3 scripts/test_4d.py --tool4d /path/to/tool4d \
-  --component build/release-test/REPOSITORY.4dbase
+python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d \
+  --component build/release-test/4d-component-image-cmyk.4dbase
 ```
 
-The driver runs real `Compile project` for `x86_64_generic` and
-`arm64_macOS_lib`, requiring a **fresh successful JSON result**. Errors or absent
-results fail even when tool4d exits zero. It cleans generated DerivedData before
-recompile (stale compiled projects can otherwise be treated as sourceless).
-Native Libraries and CompiledCode are required, not source-shaped substitutes.
-The compile marker binds inputs with `input_sha256` and generated
-DerivedData/Libraries with `output_sha256`, rejecting changed outputs at packaging.
+Before assembly, obtain **all three native executable artifacts and manifests
+from the same commit/input revision**, then use
+`python3 scripts/ci_config.py assemble --root .`. Do not mix stale binaries.
+Compilation must produce fresh successful evidence and genuine CompiledCode
+and native Libraries. Packaging strips class/method source; the last test must
+load the exact unpacked ZIP and report compiled mode, not the source folder.
+`scripts/accept_local.py` can orchestrate these stages when all artifacts are
+available. Read its help and [the acceptance playbook](AGENTS.md).
 
-Align `template.json.version`, `package.json.version` and the CLI version,
-commit and push `v<version>`, e.g. `v0.1.0`. Release builds all CLI targets from
-that same tag, compiles after Resources assembly, packs `REPOSITORY.zip`,
-and **loads the unpacked compiled package in a real 4D host before publishing**.
-Uninitialized/misnamed projects, missing tool/binary/library, failed compile or
-failed host test fail closed. Only the publish job receives `contents:write`
-through built-in `GITHUB_TOKEN`; no personal token/version-bot commit needed.
+**Validation status:** use the exact revision and bytes in the selected CI
+artifact's evidence, not this README alone. The helper correctly reports
+`result:"partial"`, `finished:true`, `release_ready:false` after successful
+ARM64 acceptance; separate native CI provides Intel/Windows CLI evidence, not
+Intel/Windows 4D evidence. The unsigned artifact/evidence pair is
+`dist/4d-component-image-cmyk.zip` and adjacent
+`dist/4d-component-image-cmyk.acceptance.json`. Check `build/acceptance.json`,
+`build/source-host-status.json`, `build/compiled-host-status.json` and
+`build/compile-status.json` for the actual revision, hashes, tools and results.
+No signing, notarization, publication or download/install success is implied.
 
-```text
-REPOSITORY.zip
-  REPOSITORY.4dbase/
-    REPOSITORY.4DZ                     standard ZIP: Project metadata + CompiledCode
-    Libraries/lib4d-arm64.dylib        OUTSIDE .4DZ
-    Resources/bin/macOS/CLI            universal, executable ZIP mode
-    Resources/bin/Windows/CLI.exe      x64
-    Resources/licenses/LICENSE        redistribution notice included
-    Resources/logo.* + en.lproj/...
-    Documentation/Classes/...
-```
+## Installation after a validated release
 
-Packed `.4DZ` excludes `.4dm` Classes/Methods source. ZIP order/timestamps/modes
-are deterministic; serviced native compiler outputs need not be bit-identical.
-Explicit nested directory ZIP records are required: omitting them caused a real
-tool4d compiled-component loader crash, despite producing a generally valid ZIP.
-
-### Run workflows manually
-
-After this workflow version is merged to the **default branch**, open
-**Actions → CI → Run workflow** and choose a branch for validation.
-Hosted 4D remains opt-in through `FOURD_ENABLED`; a CLI-only green run does not
-prove compilation or host loading.
-
-**Actions → Release compiled component → Run workflow** requires `version_tag`:
-an **existing** `v<SemVer>` tag matching the initialized component version.
-It does not create a tag. The gate resolves the tag to a commit SHA, then every
-native build, assembly, compilation and publication job uses that exact SHA,
-not the UI-selected branch. Version/repository/4D gates and final unpacked
-compiled-host acceptance are mandatory. Before publication the tag is refreshed
-and checked against that SHA, then `gh release create --verify-tag` is used.
-Do not dispatch publication or create tags without approval. Merely opening
-this PR does not make the new **Run workflow** button available in the default
-template; the workflow file must first merge.
-
-### Optional signing/notarization
-
-**Registering Apple secrets does not enable signing.** The current
-`.github/workflows/release.yml` creates an **unsigned** component and does not
-consume any of the seven secrets below. They are credentials for a future,
-explicitly implemented opt-in signing/notarization workflow, not prerequisites
-for the free local tool4d compiler or this unsigned release workflow.
-
-In the **newly generated repository**, register private credentials under
-**Settings → Secrets and variables → Actions → Secrets → New repository secret**.
-GitHub's **Use this template does not inherit secrets or repository variables**.
-Never put credentials, exported certificates, private keys or account passwords
-in source, `package.json`, workflow YAML, logs or a pull request.
-
-| Repository Actions secret | Exact value/type |
-| --- | --- |
-| `APPLE_DEVELOPER_ID_CERTIFICATE` | Base64 encoding of an exported **Developer ID Application `.p12` containing the private key**, not just a public `.cer`, PEM certificate or its filename. Export the signing identity and private key together from Keychain Access. |
-| `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD` | The password chosen when exporting that `.p12`; not the Apple Account password or temporary keychain password. |
-| `KEYCHAIN_PASSWORD` | An arbitrary strong, randomly generated password for the workflow's temporary keychain. It need not match any account password. |
-| `NOTARYTOOL_APPLE_ID` | The Apple Account **email address** authorized to notarize for the Developer team. |
-| `NOTARYTOOL_TEAM_ID` | The Apple Developer **Team ID** associated with the signing identity and notarization account. |
-| `NOTARYTOOL_PASSWORD` | An Apple **app-specific password** generated for notarization; **not** the ordinary Apple Account login password. |
-| `CODESIGN_APPLE_ID` | Despite its misleading name, the full **Developer ID Application signing identity**, e.g. `Developer ID Application: Organization (TEAMID)`, or the certificate's SHA-1 identity fingerprint. **Not an email address.** |
-
-Keep public build configuration separate under **Actions → Variables**:
-`FOURD_ENABLED=true` is the intentional hosted 4D opt-in. The approved public
-tool4d build and archive SHA256 are already pinned in `package.json.tool`;
-`TOOL4D_URL` and `TOOL4D_SHA256` are **optional paired overrides**, not required
-secrets. Supply both or neither; incomplete/invalid overrides fail.
-GitHub supplies `GITHUB_TOKEN` automatically; only the publish job grants it
-`contents: write`. Do not register a personal token for this workflow.
-
-Signing is **not required** by this unsigned build/release pipeline. PDF references
-sign macOS distributions; their release policy is not an intrinsic 4D requirement.
-Windows Authenticode and Apple notarization are not configured here.
-
-For production, explicitly add opt-in signing before final package validation:
-certificate/password, ephemeral keychain password, identity and notarization
-credentials in Actions **secrets only**; minimum entitlements; fail each codesign
-error; require notarization JSON `Accepted`; clean temporary keychain in
-`always()`; retest the final signed package. Bare CLI executables cannot be
-stapled. Stapling a signed container and Apple's recommended `Contents/` component
-layout require deliberate packaging changes. Never `continue-on-error` signing.
-Gatekeeper/quarantine can block unsigned downloaded executables; no runtime
-trust bypass is supplied.
-
-## Icons
-
-Original `assets/icon-source.svg` is rendered to a **real 1024×1024 RGBA PNG**.
-Resources `logo.svg` is a reference-style **64×64 SVG embedding a PNG data URI**
-whose decoded bytes equal `logo.png`. The convention is **PNG-in-SVG**, not the
-reverse (verified across all three inspirations).
-
-```sh
-python3 scripts/generate_icons.py
-python3 scripts/generate_icons.py --check
-```
-
-Regenerate both icons together. The dependency-free renderer supports this
-original rectangle/polygon artwork; unsupported elements fail explicitly.
-Use a pinned real SVG rasterizer for richer artwork, never rename SVG to PNG.
-
-## Remarks and validation limitations
-
-No PDF settings/algorithms, tables/authentication schema, async queue, network
-installer or external PATH search. Generic helpers are internal-by-convention.
-Implement cancellation/streaming explicitly for features needing more than the
-finite synchronous timeout.
-
-Local Apple Silicon validation covers all three CLI starters, initialization,
-icon/package invariants, actual free tool4d compilation and namespaced host
-calls against both source and the unpacked source-stripped release artifact,
-including `Is compiled mode = True`. Hosted Windows/macOS Intel, Windows **4D** quoting, dependency-manager
-download from a new release, and signing are separate observations; Python or
-CLI tests alone do not prove them. See PR results for exact observed checks.
-
-## Licensing and provenance
-
-New scaffold, CLI starters, tests and original icon are **MIT**: [LICENSE](LICENSE).
-Keep its copyright/license in redistributed source/binary assets. Future bundled
-tools, libraries and static dependencies carry their own upstream license/NOTICE
-obligations: include notices in `component/<name>/Resources/licenses/`.
-4D/tool4d are separately licensed vendor tools, not MIT dependencies.
-Initialization copies the selected Go BSD or Rust MIT runtime notice from
-`cli-starters/<language>/licenses/` into packaged `Resources/licenses/`;
-packing rejects a missing baseline notice. This does **not** audit added
-dependencies or all runtime exceptions. Review Rust's release
-`COPYRIGHT-library.html` for applicable standard-library third-party notices,
-and Microsoft static-CRT redistribution terms for Windows C++ builds.
-System dylibs are not bundled by default. Recheck notices when changing
-toolchains, dependencies or linked runtime code.
-
-Conventions were verified from
-[pdfdistill-pdfcpu](https://github.com/miyako/pdfdistill-pdfcpu),
-[pdfdistill-qpdf](https://github.com/miyako/pdfdistill-qpdf),
-[pdfdistill-lopdf](https://github.com/miyako/pdfdistill-lopdf)
-(MIT, 2026 Keisuke Miyako), and
-[4d-class-compiler](https://github.com/miyako/4d-class-compiler)
-(MIT, 2022 Keisuke Miyako). No feature algorithms, binaries or artwork were copied.
-[4d-plugin-tutorial](https://github.com/miyako/4d-plugin-tutorial) inspired the
-agent-driven tutorial UX; this is a component/standalone CLI, not its native
-plug-in SDK/code. Official references:
-[dependency naming](https://developer.4d.com/docs/Project/components),
-[Compile project](https://developer.4d.com/docs/commands/compile-project),
-[SystemWorker](https://developer.4d.com/docs/API/SystemWorkerClass) and
-[error handling](https://developer.4d.com/docs/20/Concepts/error-handling).
+In the host Dependency manager, add GitHub repository
+`miyako/4d-component-image-cmyk` and a published matching version tag.
+The release asset must be `4d-component-image-cmyk.zip`. Dependency-manager
+GitHub support requires a compatible 4D release (20 R6 or later/current LTS).
+Alternatively, manually copy the unpacked
+`4d-component-image-cmyk.4dbase` into the host's `Components/` folder and reload.
+Manual local loading is not evidence of published dependency-manager install.

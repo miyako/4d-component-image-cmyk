@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "dependencies": [
+    {"name":"zlib","version":"1.3.1","url":"https://codeload.github.com/madler/zlib/tar.gz/refs/tags/v1.3.1","sha256":"17e88863f3600672ab49182f217281b6fc4d3c762bde361935e436a95214d05c","license":"zlib","notice":"LICENSE"},
+    {"name":"jpeg","version":"3.1.1","url":"https://codeload.github.com/libjpeg-turbo/libjpeg-turbo/tar.gz/refs/tags/3.1.1","sha256":"304165ae11e64ab752e9cfc07c37bfdc87abd0bfe4bc699e59f34036d9c84f72","license":"IJG/BSD-3-Clause/zlib","notice":"LICENSE.md"},
+    {"name":"png","version":"1.6.47","url":"https://codeload.github.com/pnggroup/libpng/tar.gz/refs/tags/v1.6.47","sha256":"631a4c58ea6c10c81f160c4b21fa8495b715d251698ebc2552077e8450f30454","license":"libpng-2.0","notice":"LICENSE"},
+    {"name":"tiff","version":"4.7.0","url":"https://download.osgeo.org/libtiff/tiff-4.7.0.tar.xz","sha256":"273a0a73b1f0bed640afee4a5df0337357ced5b53d3d5d1c405b936501f71017","license":"libtiff","notice":"LICENSE.md"},
+    {"name":"lcms","version":"2.17","url":"https://codeload.github.com/mm2/Little-CMS/tar.gz/refs/tags/lcms2.17","sha256":"6e6f6411db50e85ae8ff7777f01b2da0614aac13b7b9fcbea66dc56a1bc71418","license":"MIT","notice":"LICENSE"},
+    {"name":"json","version":"3.12.0","url":"https://codeload.github.com/nlohmann/json/tar.gz/refs/tags/v3.12.0","sha256":"4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187","license":"MIT","notice":"LICENSE.MIT"}
+  ]
+}

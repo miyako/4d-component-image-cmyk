@@ -12,6 +12,8 @@ def sha256(path):
 def source_digest(root):
     root = Path(root).resolve()
     files = [root / "template.json", root / "package.json"]
+    files += [root / "scripts" / name for name in ("build_cli.py", "build_dependencies.py")
+              if (root / "scripts" / name).is_file()]
     files += sorted(path for path in (root / "cli").rglob("*")
                     if path.is_file() and path.relative_to(root / "cli").parts[0] not in {"target", "build"})
     digest = hashlib.sha256()
@@ -32,10 +34,12 @@ def commit(root):
     return lines[1]
 
 
-def record(root, target, executable, tested, toolchain):
+def record(root, target, executable, tested, toolchain, dependencies=None):
     status = {"schema": 1, "target": target, "source_sha256": source_digest(root),
               "commit": commit(root), "binary_sha256": sha256(executable),
               "execution": "passed" if tested else "not_run", "toolchain": toolchain}
+    if dependencies is not None:
+        status["dependencies"] = dependencies
     executable.with_name("build-manifest.json").write_text(json.dumps(status, indent=2) + "\n")
     return status
 

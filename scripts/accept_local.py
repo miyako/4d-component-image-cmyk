@@ -60,7 +60,6 @@ def accept(root, repository, tool4d, cross=False):
             environment = os.environ.copy()
             environment["TEST_CLI_LANGUAGE"] = config["language"]
             subprocess.run(arguments, cwd=root, env=environment, check=True, timeout=900)
-        step("unit", lambda: run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]))
         step("icons", lambda: run([sys.executable, "scripts/generate_icons.py", "--check"]))
         targets = TARGETS if cross else (native,)
         for target in targets:
@@ -69,6 +68,7 @@ def accept(root, repository, tool4d, cross=False):
                 {"status": "passed"} if target == native else
                 {"status": "not_run", "reason": "cross-built only; not executed on its native OS"})
             save()
+        step("unit", lambda: run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]))
         if native == "macos-arm64" and "macos-x64" in targets:
             probe = subprocess.run(["arch", "-x86_64", "/usr/bin/true"], capture_output=True)
             if probe.returncode == 0:

@@ -6,6 +6,7 @@ Project metadata and compiled code are retained, but interpreted methods/classes
 are excluded. Both ZIP levels are deterministic and require verified compilation.
 """
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -23,6 +24,36 @@ from compile_component import input_digest, output_digest
 COMPILE_TARGETS = {"x86_64_generic", "arm64_macOS_lib"}
 RUNTIME_NOTICES = {"go": "Go-LICENSE.txt", "rust": "Rust-LICENSE-MIT.txt"}
 EXCLUDED = {"data", "logs", ".git", ".ds_store", "__macosx"}
+
+
+def validate_dependency_notices(root, component):
+    lock = root / "cli/dependencies.json"
+    if not lock.is_file():
+        return
+    pins = {entry["name"]: entry for entry in json.loads(lock.read_text())["dependencies"]}
+    directory = component / "Resources/licenses"
+    manifest = directory / "provenance.json"
+    if not manifest.is_file() or manifest.is_symlink():
+        raise ValueError("pinned dependency notice provenance is required")
+    notices = json.loads(manifest.read_text()).get("notices")
+    if not isinstance(notices, list) or not notices:
+        raise ValueError("dependency notice provenance must be nonempty")
+    covered = set()
+    for notice in notices:
+        name = notice.get("dependency")
+        filename = notice.get("path")
+        if (name not in pins or not isinstance(filename, str)
+                or PurePosixPath(filename).name != filename or "\\" in filename
+                or notice.get("source_sha256") != pins[name]["sha256"]
+                or notice.get("version") != pins[name]["version"]):
+            raise ValueError("invalid pinned dependency notice provenance")
+        path = directory / filename
+        if (not path.is_file() or path.is_symlink()
+                or hashlib.sha256(path.read_bytes()).hexdigest() != notice.get("sha256")):
+            raise ValueError("missing or modified dependency notice: " + filename)
+        covered.add(name)
+    if covered != set(pins):
+        raise ValueError("dependency notices do not cover every pinned library")
 
 
 def write_zip(stream, entries):
@@ -144,6 +175,7 @@ def package(root=ROOT, *, repository=None, tag=None, language=None):
     if component.is_symlink() or component.parent.is_symlink():
         raise ValueError("component directories must not be symlinks")
     validate_resources(component, config["cli"])
+    validate_dependency_notices(root, component)
     if config["language"] in RUNTIME_NOTICES:
         notice = component / "Resources/licenses" / RUNTIME_NOTICES[config["language"]]
         if not notice.is_file() or notice.is_symlink() or not notice.read_bytes().strip():
