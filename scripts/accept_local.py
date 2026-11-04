@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run local acceptance via existing helpers; always label non-hosted coverage partial."""
+"""Run partial local acceptance; tool4d does not validate normal 4D app loading."""
 import argparse
 from datetime import datetime, timezone
 import json
@@ -14,7 +14,7 @@ from ci_config import ROOT, TARGETS, assemble, load_config, require_tool4d_host
 from compile_component import compile_component
 from doctor import doctor
 from package_component import package, unpack_for_test, validate_resources
-from test_4d import test_4d
+from test_4d import execution_scope, test_4d
 
 
 def accept(root, repository, tool4d, cross=False):
@@ -26,18 +26,23 @@ def accept(root, repository, tool4d, cross=False):
     names = ["unit", "icons", *("cli_build_" + target for target in TARGETS),
              *("cli_test_" + target for target in TARGETS), "cli_rosetta",
              "dependencies", "assembly", "source_host", "compile", "package", "compiled_host",
-             "hosted_cli", "native_intel_4d", "windows_4d", "release_download", "signing"]
+             "hosted_cli", "native_intel_4d", "windows_4d", "real_4d_application",
+             "release_download", "signing"]
     report = {"schema": 1, "scope": "local", "release_ready": False, "result": "partial",
               "started_at": datetime.now(timezone.utc).isoformat(),
               "finished": False, "commit": commit(root), "steps": {name: {"status": "not_run", "reason": "not exercised"}
                                                for name in names}}
+    for name in ("source_host", "compiled_host"):
+        report["steps"][name].update(execution_scope())
+    report["steps"]["real_4d_application"]["reason"] = execution_scope()["normal_app_loading_reason"]
     def save():
         output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     def step(name, action):
-        report["steps"][name] = {"status": "failed", "reason": "step did not complete"}
+        scope = execution_scope() if name in ("source_host", "compiled_host") else {}
+        report["steps"][name] = {**scope, "status": "failed", "reason": "step did not complete"}
         save()
         value = action()
-        report["steps"][name] = {"status": "passed"}
+        report["steps"][name] = {**scope, "status": "passed"}
         if isinstance(value, dict):
             report["steps"][name]["details"] = value
         save()
@@ -102,7 +107,10 @@ def accept(root, repository, tool4d, cross=False):
             raise ValueError("final archive changed during host acceptance")
         report["finished"] = True
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
-        report["reason"] = "Local package verified; hosted/native Intel4D/Windows4D/release/signing remain separate observations"
+        report["reason"] = (
+            "Local package integrity and tool4d harness assertions verified; normal 4D "
+            "application external component installation/loading not_run; hosted/native "
+            "Intel4D/Windows4D/release/signing remain separate observations")
         save()
         evidence = archive.with_suffix(".acceptance.json")
         if evidence.is_symlink():

@@ -5,15 +5,20 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: Existing matching version tag (v<SemVer>); never creates a tag
-        required: true
+        description: Existing matching prerelease tag; leave empty for main-only preflight
+        required: false
         type: string
+      preflight:
+        description: Build, sign and notarize reviewed main without creating a tag or publishing
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   gate:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     outputs:
       source_sha: ${{ steps.release_ref.outputs.sha }}
@@ -25,15 +30,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Resolve existing version tag to an immutable commit
+      - name: Resolve existing tag or reviewed-main preflight to an immutable commit
         id: release_ref
         env:
           VERSION_TAG: ${{ inputs.version_tag }}
-        run: >-
-          python scripts/release_ref.py resolve
-          --event "$GITHUB_EVENT_NAME" --ref-type "$GITHUB_REF_TYPE"
-          --ref-name "$GITHUB_REF_NAME" --version-tag "$VERSION_TAG"
-          --event-sha "$GITHUB_SHA"
+          PREFLIGHT: ${{ inputs.preflight }}
+        shell: bash
+        run: |
+          args=()
+          if [[ "$PREFLIGHT" == "true" ]]; then args+=(--preflight); fi
+          python scripts/release_ref.py resolve \
+            --event "$GITHUB_EVENT_NAME" --ref-type "$GITHUB_REF_TYPE" \
+            --ref-name "$GITHUB_REF_NAME" --version-tag "$VERSION_TAG" \
+            --event-sha "$GITHUB_SHA" "${args[@]}"
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.release_ref.outputs.sha }}
@@ -55,8 +64,9 @@ jobs:
     runs-on: macos-15
     env:
       FOURD_ENABLED: ${{ vars.FOURD_ENABLED }}
-      TOOL4D_URL: ${{ vars.TOOL4D_URL }}
-      TOOL4D_SHA256: ${{ vars.TOOL4D_SHA256 }}
+      # Production uses the unchanged official package.json pin, never mutable overrides.
+      TOOL4D_URL: ''
+      TOOL4D_SHA256: ''
       RELEASE_TAG: ${{ needs.gate.outputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
@@ -80,20 +90,44 @@ jobs:
           path: build/windows-x64
       - name: Download SHA-256-verified tool4D
         run: python scripts/ci_config.py download-tool4d
-      - name: Require source, compiler and exact unpacked compiled-host acceptance
+      - name: Require tool4d source/compiler/exact unpacked compiled-package harness checks
         shell: bash
         run: |
           set -o pipefail
           python scripts/accept_local.py --root . --repository "$GITHUB_REPOSITORY" \
             --tool4d .tools/tool4d.app/Contents/MacOS/tool4d 2>&1 | tee build/release-acceptance.log
           python scripts/publish_prerelease.py --write-native-evidence
+      - name: Sign payload and DMG, notarize, staple and verify exact signed distribution
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          NOTARYTOOL_APPLE_ID: ${{ secrets.NOTARYTOOL_APPLE_ID }}
+          NOTARYTOOL_PASSWORD: ${{ secrets.NOTARYTOOL_PASSWORD }}
+          NOTARYTOOL_TEAM_ID: ${{ secrets.NOTARYTOOL_TEAM_ID }}
+          RELEASE_SHA: ${{ needs.gate.outputs.source_sha }}
+        run: >-
+          python scripts/sign_release.py --root .
+          --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
+          --tag "$RELEASE_TAG" --expected-sha "$RELEASE_SHA"
+      - name: Always remove generated signing credentials and detach temporary images
+        if: always()
+        run: python scripts/sign_release.py --root . --cleanup
+      - name: Validate final signed-byte publication gates before any tag or publication
+        env:
+          RELEASE_SHA: ${{ needs.gate.outputs.source_sha }}
+        run: >-
+          python scripts/publish_prerelease.py --validate-signed
+          --tag "$RELEASE_TAG" --expected-sha "$RELEASE_SHA"
       - uses: actions/upload-artifact@v4
         with:
           name: compiled-release
           path: |
             dist/*.zip
+            dist/*.dmg
             dist/*.acceptance.json
             dist/*.native-evidence.json
+            dist/*.signing.json
           if-no-files-found: error
           retention-days: 30
       - name: Preserve raw release evidence even on failure
@@ -106,11 +140,13 @@ jobs:
             build/*-status.json
             build/release-acceptance.log
             build/*/build-manifest.json
+            dist/*.signing.json
           if-no-files-found: warn
           retention-days: 30
 
   publish:
     needs: [gate, compile]
+    if: github.event_name != 'workflow_dispatch' || !inputs.preflight
     runs-on: ubuntu-24.04
     permissions:
       contents: write

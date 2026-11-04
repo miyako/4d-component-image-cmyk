@@ -76,6 +76,38 @@ class ReleaseRefTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already exist"):
             self.resolve(version_tag="v9.9.9")
 
+    def preflight(self, **args):
+        self.git("branch", "main")
+        self.git("remote", "add", "origin", str(self.root))
+        defaults = {"preflight": True, "ref_type": "branch", "ref_name": "main",
+                    "event_sha": self.sha, "version_tag": ""}
+        defaults.update(args)
+        with patch.object(release_ref, "load_config", return_value={"version": "0.1.0-rc.2"}):
+            return self.resolve(**defaults)
+
+    def test_preflight_validates_main_without_creating_a_tag(self):
+        self.assertEqual(self.preflight(), {"tag": "v0.1.0-rc.2", "sha": self.sha})
+        self.assertEqual(self.git("tag", "--list"), "v0.1.0")
+
+    def test_preflight_rejects_nonproduction_refs_before_commands(self):
+        for args in ({"event": "pull_request"}, {"event": "push"}, {"ref_name": "feature"},
+                     {"ref_type": "tag"}, {"event_sha": "HEAD"}):
+            with self.subTest(args=args), patch.object(release_ref.subprocess, "run") as run:
+                with self.assertRaises(ValueError):
+                    self.resolve(preflight=True, ref_type=args.get("ref_type", "branch"),
+                                 ref_name=args.get("ref_name", "main"),
+                                 event=args.get("event", "workflow_dispatch"),
+                                 event_sha=args.get("event_sha", self.sha))
+                run.assert_not_called()
+
+    def test_preflight_rejects_stale_event_or_wrong_version(self):
+        with self.assertRaisesRegex(ValueError, "current origin/main"):
+            self.preflight(event_sha="f" * 40)
+        with patch.object(release_ref, "load_config", return_value={"version": "0.1.0-rc.2"}):
+            with self.assertRaisesRegex(ValueError, "matching prerelease"):
+                self.resolve(preflight=True, ref_type="branch", ref_name="main",
+                             event_sha=self.sha, version_tag="v0.1.0-rc.9")
+
     def test_tag_pointing_at_blob_fails(self):
         (self.root / "blob").write_text("not a commit", encoding="utf-8")
         blob = self.git("hash-object", "-w", "blob")
@@ -177,6 +209,24 @@ class ReleaseRefTests(unittest.TestCase):
         publisher = (ROOT / "scripts/publish_prerelease.py").read_text(encoding="utf-8")
         for flag in ("--verify-tag", "--prerelease", "--latest=false"):
             self.assertIn(flag, publisher)
+
+    def test_signing_is_production_only_and_preflight_never_publishes(self):
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'", release)
+        self.assertIn("if: github.event_name != 'workflow_dispatch' || !inputs.preflight", release)
+        self.assertIn("scripts/sign_release.py --root .", release)
+        self.assertIn("dist/*.dmg", release)
+        self.assertIn("dist/*.signing.json", release)
+        self.assertNotIn("continue-on-error", release)
+        for secret in ("APPLE_DEVELOPER_ID_CERTIFICATE", "APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD",
+                       "KEYCHAIN_PASSWORD", "NOTARYTOOL_APPLE_ID", "NOTARYTOOL_PASSWORD",
+                       "NOTARYTOOL_TEAM_ID"):
+            self.assertEqual(release.count("${{ secrets." + secret + " }}"), 1)
+            self.assertNotIn(secret, ci)
+        self.assertNotIn("CODESIGN_APPLE_ID", release)
+        self.assertIn("TOOL4D_URL: ''", release)
+        self.assertIn("TOOL4D_SHA256: ''", release)
 
 
 if __name__ == "__main__":

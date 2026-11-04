@@ -1,9 +1,12 @@
 import copy
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 import importlib.util
+import io
 import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import unittest
 import uuid
 from unittest.mock import patch
@@ -14,6 +17,8 @@ spec = importlib.util.spec_from_file_location("host_runner", ROOT / "scripts/tes
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 CONTRACT = json.loads((ROOT / "tests/host/contract.json").read_text(encoding="utf-8"))
+with patch.object(sys, "path", [str(ROOT / "scripts"), *sys.path]):
+    import accept_local
 
 
 def valid_status(compiled=False):
@@ -298,6 +303,11 @@ class HostRunnerTests(unittest.TestCase):
             self.assertIn('"', request_path.name)
         self.assertIn(" ", request_path.name)
         host = request_path.parent
+        self.assertFalse((host / "Project/Sources/Classes").exists())
+        self.assertEqual({path.name for path in (host / "Project/Sources/Methods").iterdir()},
+                         {"Smoke.4dm", "Host_error.4dm"})
+        smoke = (host / "Project/Sources/Methods/Smoke.4dm").read_text(encoding="utf-8")
+        self.assertIn("cs.CMYK.Converter.new", smoke)
         self.assertIn("日本語", host.parent.name)
         if runner.os.name == "nt":
             self.assertNotIn("'", host.parent.name)
@@ -344,8 +354,12 @@ class HostRunnerTests(unittest.TestCase):
         shutil.copytree(self.source, release)
         (release / "marker").write_text("release")
         with patch.object(runner.subprocess, "run", side_effect=self.fake_host):
-            self.assertFalse(self.run_host()["compiled"])
-            self.assertTrue(self.run_host(release)["compiled"])
+            for component, compiled in ((None, False), (release, True)):
+                status = self.run_host(component)
+                self.assertIs(status["compiled"], compiled)
+                self.assertEqual(status["execution_scope"], "tool4d_harness")
+                self.assertEqual(status["normal_app_loading"], "not_run")
+                self.assertEqual(json.loads(self.output.read_text()), status)
         self.assertTrue(self.output.is_file())
         self.assertEqual(list(self.output.parent.glob("4D host *")), [])
 
@@ -357,6 +371,38 @@ class HostRunnerTests(unittest.TestCase):
             self.run_host()
         self.assertFalse(self.output.exists())
         self.assertEqual(list(self.output.parent.glob("4D host *")), [])
+
+    def test_scope_is_runner_owned(self):
+        def misleading(args, **kwargs):
+            completed = self.fake_host(args, **kwargs)
+            request = json.loads(Path(next(a.split("=", 1)[1] for a in args
+                                          if a.startswith("--user-param="))).read_text())
+            output = Path(request["status"])
+            status = json.loads(output.read_text())
+            status.update(execution_scope="normal_4d_application", normal_app_loading="passed")
+            output.write_text(json.dumps(status))
+            return completed
+        with patch.object(runner.subprocess, "run", side_effect=misleading):
+            status = self.run_host()
+        self.assertEqual(status["execution_scope"], "tool4d_harness")
+        self.assertEqual(status["normal_app_loading"], "not_run")
+
+    def test_command_output_labels_scope_and_never_announces_failed_checks_as_passed(self):
+        for error in (None, ValueError("unfinished report"), subprocess.CalledProcessError(-11, ["tool4d"])):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with self.subTest(error=error), patch.object(
+                    sys, "argv", ["test_4d.py", "--tool4d", "/fake/tool4d"]), \
+                    patch.object(runner, "test_4d", side_effect=error), \
+                    redirect_stdout(stdout), redirect_stderr(stderr):
+                result = runner.main()
+            if error is None:
+                self.assertEqual(result, 0)
+                self.assertIn("tool4d harness contract passed", stdout.getvalue())
+                self.assertIn("normal 4D application component loading: not_run", stdout.getvalue())
+            else:
+                self.assertEqual(result, 1)
+                self.assertNotIn("passed", stdout.getvalue())
+                self.assertIn("tool4d harness tests failed", stderr.getvalue())
 
     def test_malformed_incomplete_and_duplicate_json_fail(self):
         for text in ("not json", "null", "[]", '{"success":true}',
@@ -454,3 +500,72 @@ class HostRunnerTests(unittest.TestCase):
             Path(request["status"]).symlink_to(self.root / "template.json")
         with patch.object(runner.subprocess, "run", side_effect=linked), self.assertRaisesRegex(ValueError, "symlinks"):
             self.run_host()
+
+
+class AcceptanceScopeTests(unittest.TestCase):
+    def setUp(self):
+        self.root = ROOT / "build" / ("acceptance-scope-" + uuid.uuid4().hex)
+        self.root.mkdir(parents=True)
+        self.addCleanup(lambda: shutil.rmtree(self.root))
+        self.tool = self.root / "tool4d-placeholder"
+        self.tool.write_bytes(b"not an executable")
+        self.archive = self.root / "CMYK.zip"
+        self.archive.write_bytes(b"mock archive, not runtime evidence")
+        self.config = json.loads((ROOT / "template.json").read_text())
+
+    def run_acceptance(self, fail=None):
+        def host(root, tool, component=None):
+            name = "compiled_host" if component is not None else "source_host"
+            pending = json.loads((self.root / "build/acceptance.json").read_text())
+            self.assertEqual(pending["steps"][name]["status"], "failed")
+            self.assertEqual(pending["steps"][name]["normal_app_loading"], "not_run")
+            self.assertEqual(pending["steps"]["real_4d_application"]["status"], "not_run")
+            self.assertFalse(pending["finished"])
+            if name == fail:
+                raise subprocess.CalledProcessError(-11, ["mock-tool4d"])
+            return {**runner.execution_scope(), "success": True, "finished": True,
+                    "compiled": component is not None}
+
+        with ExitStack() as stack:
+            replacements = {
+                "commit": "mock-revision", "load_config": self.config, "doctor": {},
+                "require_tool4d_host": None, "native_target": "macos-arm64",
+                "build": None, "assemble": None, "validate_resources": None,
+                "compile_component": {"success": True}, "package": self.archive,
+                "unpack_for_test": self.root / "release.4dbase"}
+            for name, value in replacements.items():
+                stack.enter_context(patch.object(accept_local, name, return_value=value))
+            stack.enter_context(patch.object(accept_local, "test_4d", side_effect=host))
+            stack.enter_context(patch.object(accept_local.subprocess, "run", return_value=
+                subprocess.CompletedProcess([], 0, "mock-tool4d-version\n", "")))
+            return accept_local.accept(self.root, "miyako/CMYK", self.tool)
+
+    def test_successful_harness_never_claims_normal_application_loading(self):
+        report = self.run_acceptance()
+        self.assertEqual(report["result"], "partial")
+        self.assertTrue(report["finished"])
+        self.assertFalse(report["release_ready"])
+        self.assertEqual(report["steps"]["real_4d_application"]["status"], "not_run")
+        for name in ("source_host", "compiled_host"):
+            step = report["steps"][name]
+            self.assertEqual(step["status"], "passed")
+            self.assertEqual(step["execution_scope"], "tool4d_harness")
+            self.assertEqual(step["normal_app_loading"], "not_run")
+            self.assertEqual(step["details"]["normal_app_loading"], "not_run")
+        saved = json.loads(self.archive.with_suffix(".acceptance.json").read_text())
+        self.assertEqual(saved, report)
+        self.assertIn("installation/loading not_run", report["reason"])
+
+    def test_failed_harness_never_finishes_or_writes_final_evidence(self):
+        for name in ("source_host", "compiled_host"):
+            with self.subTest(step=name), self.assertRaises(subprocess.CalledProcessError):
+                self.run_acceptance(fail=name)
+            report = json.loads((self.root / "build/acceptance.json").read_text())
+            self.assertEqual(report["result"], "failed")
+            self.assertFalse(report["finished"])
+            self.assertFalse(report["release_ready"])
+            self.assertEqual(report["steps"][name]["status"], "failed")
+            self.assertEqual(report["steps"][name]["execution_scope"], "tool4d_harness")
+            self.assertEqual(report["steps"][name]["normal_app_loading"], "not_run")
+            self.assertEqual(report["steps"]["real_4d_application"]["status"], "not_run")
+            self.assertFalse(self.archive.with_suffix(".acceptance.json").exists())

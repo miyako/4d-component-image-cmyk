@@ -9,7 +9,7 @@ native Windows ARM64 is unsupported.
 | --- | --- |
 | `inspectFile(file : 4D.File) : Object` | Image dimensions, model, channels, format, DPI, orientation and embedded ICC information |
 | `convertFile(source : 4D.File; destination : 4D.File; options : Object) : Object` | ICC-managed CMYK TIFF/JPEG conversion and selected profiles |
-| `version() : Object` | `{protocol:1,version:"0.1.0-rc.1"}` |
+| `version() : Object` | `{protocol:1,version:"0.1.0-rc.2"}` |
 
 These are synchronous, separate-process calls with closed stdin and a finite
 30-second timeout. There is no shared mutable conversion state or asynchronous
@@ -132,10 +132,15 @@ kind and quotes each literal into SystemWorker command-line Text. Spaces,
 Unicode, quotes and shell metacharacters are data, not shell instructions.
 
 `_cli`, `_decode` and the validation helpers are internal by convention, not a
-4D access-control boundary. The real host fixture requires an isolated
+4D access-control boundary. The tool4d harness fixture requires an isolated
 `request.fixtureDirectory`, inspects all three input formats, converts and
 re-inspects CMYK TIFF/JPEG outputs, and independently checks the recorded
 envelopes against `tests/host/contract.json`. It also retains generic process
 type/NUL/resource/launch checks and a renamed executable in quoted/Unicode paths.
 Passing a Folder as an inspect source deliberately reaches the CLI and fails
 as a directory; it is distinct from the adapter rejecting an unsupported type.
+The component is staged under the isolated host's `Components/CMYK.4dbase`;
+`Smoke` calls `cs.CMYK` directly without copying feature classes into host
+Sources. Successful tool4d execution and compiled-mode assertions do **not**
+establish normal external component installation/loading in the actual 4D
+application. That separate check remains `not_run`.

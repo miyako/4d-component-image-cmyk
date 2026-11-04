@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       accept_4d:
-        description: Run unsigned source/compile/packed-host acceptance with the default pinned free tool4d
+        description: Run unsigned source/compiler/packed-component tool4d harness with the default pinned runtime
         type: boolean
         default: false
   workflow_call:
@@ -128,7 +128,7 @@ jobs:
           TOOL4D_URL: ${{ !inputs.accept_4d && vars.TOOL4D_URL || '' }}
           TOOL4D_SHA256: ${{ !inputs.accept_4d && vars.TOOL4D_SHA256 || '' }}
         run: python scripts/ci_config.py download-tool4d
-      - name: Require source, compiler and exact unpacked compiled-host acceptance
+      - name: Require tool4d source/compiler/exact unpacked compiled-package harness checks
         id: acceptance
         if: (vars.FOURD_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.accept_4d)) && github.ref_type != 'tag' && !inputs.release_call
         shell: bash

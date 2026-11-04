@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the namespaced API from an actual host project using free tool4d."""
+"""Exercise namespaced API/mode assertions in a tool4d harness, not the normal 4D app."""
 import argparse
 import json
 import os
@@ -9,6 +9,14 @@ import subprocess
 import sys
 import shutil
 import uuid
+
+
+def execution_scope():
+    """Describe the evidence boundary independently of whether assertions pass."""
+    return {"execution_scope": "tool4d_harness", "normal_app_loading": "not_run",
+            "normal_app_loading_reason":
+                "tool4d harness execution does not establish normal external component "
+                "installation/loading in the actual 4D application"}
 
 
 def _pointer(value, path):
@@ -237,7 +245,10 @@ def test_4d(root, tool4d, component=None):
         if not staged_output.is_file() or staged_output.is_symlink():
             raise ValueError("tool4d did not write host-status.json; host execution is unverified")
         status = _read_json(output)
-        return validate_status(status, contract, component is not None)
+        validate_status(status, contract, component is not None)
+        status.update(execution_scope())
+        output.write_text(json.dumps(status, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return status
     finally:
         shutil.rmtree(staging)
 
@@ -246,14 +257,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--tool4d", type=Path, required=True)
-    parser.add_argument("--component", type=Path, help="load this unpacked .4dbase instead of the source project")
+    parser.add_argument("--component", type=Path,
+                        help="stage this unpacked .4dbase for tool4d compiled-mode assertions")
     args = parser.parse_args()
     try:
         test_4d(args.root, args.tool4d, args.component)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
-        print(f"4D host tests failed: {error}", file=sys.stderr)
+        print(f"tool4d harness tests failed: {error}", file=sys.stderr)
         return 1
-    print("4D host contract passed")
+    print("tool4d harness contract passed; normal 4D application component loading: not_run")
     return 0
 
 
