@@ -1,5 +1,5 @@
 {
-  "name": "4d-component-image-cmyk",
+  "name": "CMYK",
   "version": "0.1.0",
   "private": true,
   "description": "ICC-managed RGB/CMYK image conversion using Little CMS, JPEG, PNG and TIFF",

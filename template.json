@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "initialized": true,
-  "repository": "4d-component-image-cmyk",
+  "repository": "CMYK",
   "namespace": "ImageCMYK",
   "cli": "image-cmyk",
   "language": "cpp",
