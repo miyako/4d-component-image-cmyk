@@ -1,6 +1,6 @@
 {
 	"_method_": {},
-	"cs.ImageCMYK": {
+	"cs.CMYK": {
 		"_CLI": {
 			"new()": {
 				"Syntax": "**.new**( *executableName* : Text; *target* : Text )",

@@ -2,7 +2,7 @@
 var $ignored : Integer
 var $parameter; $name; $target : Text
 var $request; $result; $report; $options; $payload : Object
-var $tool : cs.ImageCMYK.Converter
+var $tool : cs.CMYK.Converter
 var $requestFile; $statusFile; $source; $destination; $profile : 4D.File
 var $renamedExecutable : 4D.File
 var $fixtures : 4D.Folder
@@ -31,7 +31,7 @@ $target:="macOS-universal"
 If (Is Windows)
 	$target:="Windows-x64"
 End if
-$tool:=cs.ImageCMYK.Converter.new($target)
+$tool:=cs.CMYK.Converter.new($target)
 $report:=New object("success"; True; "finished"; False; "cases"; New collection)
 $report.compiled:=$tool._cli.compiled
 HOST_Phase:="fixture directory"
@@ -45,7 +45,7 @@ End if
 $profile:=$fixtures.file("destination.icc")
 $options:=New object("destinationProfile"; $profile)
 HOST_Phase:="renamed executable"
-$report.renamedExecutable:=cs.ImageCMYK._Process.new().execute($renamedExecutable; New collection("--version"))
+$report.renamedExecutable:=cs.CMYK._Process.new().execute($renamedExecutable; New collection("--version"))
 If (Not($report.renamedExecutable.ok))
 	$report.success:=False
 End if
@@ -108,18 +108,18 @@ If (Not($result.ok))
 	$report.success:=False
 End if
 HOST_Phase:="missing executable"
-$result:=cs.ImageCMYK._CLI.new("missing-cli"; $target).execute(New collection("--version"))
+$result:=cs.CMYK._CLI.new("missing-cli"; $target).execute(New collection("--version"))
 $report.missing:=$result
 If ($result.error.code#"missing_executable")
 	$report.success:=False
 End if
-$result:=cs.ImageCMYK.Converter.new("unsupported-arm-target").version()
+$result:=cs.CMYK.Converter.new("unsupported-arm-target").version()
 $report.unsupported:=$result
 If ($result.error.code#"unsupported_architecture")
 	$report.success:=False
 End if
 HOST_Phase:="launch failure"
-$result:=cs.ImageCMYK._Process.new().execute($requestFile; New collection)
+$result:=cs.CMYK._Process.new().execute($requestFile; New collection)
 $report.launch:=$result
 If ($result.error.code#"launch_failed")
 	$report.success:=False
@@ -172,7 +172,7 @@ $payload:=JSON Parse(JSON Stringify($report.cases[1].value))
 $payload.warnings:=New collection(True)
 $report.protocolFields.push($tool._decode(New object("ok"; True; "stdout"; JSON Stringify($payload); "stderr"; ""; "exitCode"; 0); "convert"))
 HOST_Phase:="File argument"
-$result:=cs.ImageCMYK._CLI.new("image-cmyk"; $target).execute(New collection("inspect"; "--source"; $source))
+$result:=cs.CMYK._CLI.new("image-cmyk"; $target).execute(New collection("inspect"; "--source"; $source))
 $report.fileArgument:=$result
 If (Not($result.ok))
 	$report.success:=False
@@ -180,7 +180,7 @@ End if
 $report.rejectedArguments:=New collection
 HOST_Phase:="scalar arguments"
 For each ($invalid; New collection(123; 1.25; True; False; Null; Current date; Current time; New collection; New object))
-	$result:=cs.ImageCMYK._Process.new().execute($requestFile; New collection($invalid))
+	$result:=cs.CMYK._Process.new().execute($requestFile; New collection($invalid))
 	$report.rejectedArguments.push(New object("type"; Value type($invalid); "result"; $result))
 	If ($result.ok | ($result.error.code#"invalid_argument"))
 		$report.success:=False
@@ -189,14 +189,14 @@ End for each
 $report.rejectedNul:=New collection
 HOST_Phase:="NUL arguments"
 For each ($name; New collection(Char(0)+"prefix"; "middle"+Char(0)+"suffix"; "trailing"+Char(0)))
-	$result:=cs.ImageCMYK._Process.new().execute($requestFile; New collection($name))
+	$result:=cs.CMYK._Process.new().execute($requestFile; New collection($name))
 	$report.rejectedNul.push($result)
 	If ($result.ok | ($result.error.code#"invalid_argument"))
 		$report.success:=False
 	End if
 End for each
-$report.missingFile:=cs.ImageCMYK._Process.new().execute(Null; New collection)
-$report.missingArguments:=cs.ImageCMYK._Process.new().execute($requestFile; Null)
+$report.missingFile:=cs.CMYK._Process.new().execute(Null; New collection)
+$report.missingArguments:=cs.CMYK._Process.new().execute($requestFile; Null)
 If ($report.missingFile.ok | ($report.missingFile.error.code#"invalid_argument"))
 	$report.success:=False
 End if
@@ -204,9 +204,9 @@ If ($report.missingArguments.ok | ($report.missingArguments.error.code#"invalid_
 	$report.success:=False
 End if
 HOST_Phase:="Folder argument"
-$report.folderArgument:=cs.ImageCMYK._CLI.new("image-cmyk"; $target).execute(New collection("inspect"; "--source"; $fixtures))
+$report.folderArgument:=cs.CMYK._CLI.new("image-cmyk"; $target).execute(New collection("inspect"; "--source"; $fixtures))
 HOST_Phase:="renamed executable File roundtrip"
-$report.renamedInspect:=cs.ImageCMYK._Process.new().execute($renamedExecutable; New collection("inspect"; "--source"; $source))
+$report.renamedInspect:=cs.CMYK._Process.new().execute($renamedExecutable; New collection("inspect"; "--source"; $source))
 If (Not($report.renamedInspect.ok))
 	$report.success:=False
 End if

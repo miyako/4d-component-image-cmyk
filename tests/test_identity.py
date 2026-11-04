@@ -22,16 +22,16 @@ class IdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "actual repository does not match"):
             load_config(ROOT, initialized=True, repository="miyako/cmyk")
 
-    def test_api_namespace_cli_and_catalog_uuid_are_preserved(self):
+    def test_namespace_and_preserved_class_cli_catalog_uuid(self):
         config = load_config(ROOT, initialized=True)
         self.assertEqual((config["namespace"], config["feature_class"], config["cli"]),
-                         ("ImageCMYK", "Converter", "image-cmyk"))
+                         ("CMYK", "Converter", "image-cmyk"))
         sources = ROOT / "component/CMYK/Project/Sources"
         catalog = ET.parse(sources / "catalog.4DCatalog").getroot()
         self.assertEqual(catalog.attrib["name"], "CMYK")
         self.assertEqual(catalog.attrib["uuid"], "B14F3854A54B56C3B6D5F79DD3EF402A")
         general = ET.parse(sources / "settings.4DSettings").find(".//general")
-        self.assertEqual(general.attrib["component_classStore_name"], "ImageCMYK")
+        self.assertEqual(general.attrib["component_classStore_name"], "CMYK")
         self.assertTrue((sources / "Classes/Converter.4dm").is_file())
 
     def test_source_host_dependency_identity_and_path(self):
@@ -52,6 +52,17 @@ class IdentityTests(unittest.TestCase):
         syntax = (ROOT / "component/CMYK/Resources/en.lproj/syntaxEN.json").read_text()
         self.assertIn("Converter", syntax)
         self.assertNotIn("Greeting", syntax)
+        metadata = json.loads(syntax)
+        self.assertIn("Converter", metadata["cs.CMYK"])
+        self.assertNotIn("cs.ImageCMYK", metadata)
+
+    def test_public_examples_and_real_host_use_cmyk_namespace(self):
+        for name in ["README.md", "component/CMYK/Documentation/Classes/Converter.md",
+                     "tests/host/Project/Sources/Methods/Smoke.4dm"]:
+            with self.subTest(path=name):
+                source = (ROOT / name).read_text(encoding="utf-8")
+                self.assertIn("cs.CMYK.Converter", source)
+                self.assertNotIn("cs.ImageCMYK.", source)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
   "schema": 1,
   "initialized": true,
   "repository": "CMYK",
-  "namespace": "ImageCMYK",
+  "namespace": "CMYK",
   "cli": "image-cmyk",
   "language": "cpp",
   "feature": "ICC-managed RGB/CMYK image conversion using Little CMS, JPEG, PNG and TIFF",
