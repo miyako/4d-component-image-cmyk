@@ -564,7 +564,10 @@ class SignatureTests(Fixture):
                 return b"", (f"Authority=Developer ID Application: Example\nTeamIdentifier={TEAM}\n"
                               "Timestamp=Nov 4, 2026\nCodeDirectory v=20500 flags=0x10000(runtime)\n").encode()
             if label == "extract signing leaf certificate":
-                prefix = args[args.index("--extract-certificates") + 1]
+                options = [arg for arg in args if arg.startswith("--extract-certificates=")]
+                self.assertEqual(len(options), 1)
+                self.assertNotIn("--extract-certificates", args)
+                prefix = options[0].split("=", 1)[1]
                 Path(prefix + "0").write_bytes(certificate)
             return b"", b""
 
