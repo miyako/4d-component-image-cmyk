@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,7 +11,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("compile_component", ROOT / "scripts/compile_component.py")
 compiler = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(compiler)
+with patch.object(sys, "path", [str(ROOT / "scripts"), *sys.path]):
+    spec.loader.exec_module(compiler)
 
 
 class CompilerTests(unittest.TestCase):
@@ -23,6 +25,8 @@ class CompilerTests(unittest.TestCase):
         (self.root / "template.json").write_text(json.dumps(config))
         for name in ("package.json", "LICENSE"):
             shutil.copy2(ROOT / name, self.root / name)
+        shutil.copytree(ROOT / "tooling/compiler", self.root / "tooling/compiler",
+                        ignore=shutil.ignore_patterns("DerivedData", "userPreferences.*", "Data", "Logs"))
         self.name = config["repository"]
         self.feature_class = config.get("feature_class", "Greeting")
         shutil.copytree(ROOT / "component" / self.name, self.root / "component" / self.name,
@@ -36,6 +40,9 @@ class CompilerTests(unittest.TestCase):
         self.assertNotIn("shell", kwargs)
         self.assertIn("--startup-method=Compile", args)
         self.assertTrue(any(a.startswith("--user-param=") for a in args))
+        harness = Path(args[1])
+        self.assertTrue(harness.is_relative_to(self.root / "build"))
+        self.assertNotEqual(harness, self.root / "tooling/compiler/Project/compiler.4DProject")
 
     def test_real_result_required_and_stale_status_removed(self):
         self.status.parent.mkdir()
@@ -71,6 +78,37 @@ class CompilerTests(unittest.TestCase):
         with patch.object(compiler.subprocess, "run", side_effect=changed):
             with self.assertRaisesRegex(ValueError, "changed during compilation"):
                 compiler.compile_component(self.root, "/fake/tool4d")
+
+    def test_compiler_runtime_outputs_are_isolated_from_versioned_harness(self):
+        source = self.root / "tooling/compiler/Project"
+        original_settings = (source / "Sources/settings.4DSettings").read_bytes()
+
+        def runtime_outputs(args, **kwargs):
+            self.result(args, **kwargs)
+            project = Path(args[1]).parent
+            (project / "DerivedData").mkdir()
+            (project / "DerivedData/cache").write_bytes(b"runtime cache")
+            (project / "Sources/catalog.4DCatalog").write_text("<base/>")
+            (project / "Sources/settings.4DSettings").write_text("runtime preferences")
+
+        with patch.object(compiler.subprocess, "run", side_effect=runtime_outputs):
+            compiler.compile_component(self.root, "/fake/tool4d")
+        self.assertFalse((source / "DerivedData").exists())
+        self.assertFalse((source / "Sources/catalog.4DCatalog").exists())
+        self.assertEqual((source / "Sources/settings.4DSettings").read_bytes(), original_settings)
+
+    @unittest.skipUnless(__import__("os").name == "posix", "symlink requires POSIX")
+    def test_compiler_harness_symlink_rejected_before_launch(self):
+        method = self.root / "tooling/compiler/Project/Sources/Methods/Compile.4dm"
+        outside = self.root / "outside.4dm"
+        outside.write_text("sentinel")
+        method.unlink()
+        method.symlink_to(outside)
+        with patch.object(compiler.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "symlinks"):
+                compiler.compile_component(self.root, "/fake/tool4d")
+            run.assert_not_called()
+        self.assertEqual(outside.read_text(), "sentinel")
 
     def test_wrong_target_and_project_rejected(self):
         def wrong(*args, **kwargs):

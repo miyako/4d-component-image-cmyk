@@ -7,6 +7,9 @@ import subprocess
 import sys
 import shutil
 import hashlib
+import uuid
+
+from test_4d import _no_symlinks
 
 
 def input_digest(root):
@@ -66,9 +69,14 @@ def compile_component(root, tool4d):
     if any(path.is_symlink() for path in [library, *library.parents]):
         raise ValueError("compiler library cleanup path must not traverse symlinks")
     library.unlink(missing_ok=True)
+    fixture = root / "tooling/compiler"
+    _no_symlinks(fixture)
+    harness = output.parent / ("compiler-host-" + uuid.uuid4().hex)
+    shutil.copytree(fixture, harness,
+                    ignore=shutil.ignore_patterns("DerivedData", "userPreferences.*", "Data", "Logs"))
     original_digest = input_digest(root)
     subprocess.run([str(Path(tool4d).resolve()),
-                    str(root / "tooling" / "compiler" / "Project" / "compiler.4DProject"),
+                    str(harness / "Project/compiler.4DProject"),
                     "--skip-onstartup", "--startup-method=Compile",
                     "--user-param=" + str(request), "--dataless"],
                    check=True, timeout=180)
