@@ -52,6 +52,9 @@ class IdentityTests(unittest.TestCase):
         syntax = (ROOT / "component/CMYK/Resources/en.lproj/syntaxEN.json").read_text()
         self.assertIn("Converter", syntax)
         self.assertNotIn("Greeting", syntax)
+        metadata = json.loads(syntax)
+        self.assertIn("Converter", metadata["cs.CMYK"])
+        self.assertNotIn("cs.ImageCMYK", metadata)
 
     def test_public_examples_and_real_host_use_cmyk_namespace(self):
         for name in ["README.md", "component/CMYK/Documentation/Classes/Converter.md",
