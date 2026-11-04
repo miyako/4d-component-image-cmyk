@@ -9,14 +9,14 @@ transforms and libpng, libjpeg-turbo and libtiff for image I/O. It is not a nati
 pass on all three targets. Source and compiled-component host acceptance pass on
 hosted macOS 15 ARM64 with the unchanged pinned tool4d 20.7; an unsigned compiled
 ZIP is available as a CI artifact. Intel/Windows 4D and published installation
-remain unvalidated; no release has been published.
+remain unvalidated. Any published candidate is an unsigned experimental prerelease.
 See [current acceptance evidence](#release-candidate-evidence-2026-11-04).
 
 | Identity | Value |
 | --- | --- |
 | Repository / component / package | `miyako/CMYK` / `CMYK` |
 | Host namespace / class | `cs.CMYK.Converter` |
-| CLI / version / protocol | `image-cmyk` / `0.1.0` / `1` |
+| CLI / version / protocol | `image-cmyk` / `0.1.0-rc.1` / `1` |
 | Implementation | C++17, CMake; statically built image/color dependencies |
 | Native targets | macOS x86_64, macOS arm64, Windows x64 |
 
@@ -134,7 +134,7 @@ image-cmyk convert --source PATH --destination PATH --destination-profile PATH
 
 Each result is exactly one UTF-8 JSON object plus LF. Success exits `0`, writes
 stdout and leaves stderr empty. Version returns
-`{"protocol":1,"version":"0.1.0"}`. Inspection includes:
+`{"protocol":1,"version":"0.1.0-rc.1"}`. Inspection includes:
 
 ```json
 {
@@ -253,8 +253,9 @@ real 4D commands below. Raw local reports/logs are under `build/`, including
 and `shutdown-probe/result{,-return,-return21}.json`. A successful JSON report
 from a crashed process is **not** a passed acceptance check.
 
-The compiled candidate is unsigned and available for review/testing, not a
-published release. Intel/Windows 4D acceptance and actual published installation
+The compiled candidate is unsigned and available for review/testing; CI artifacts
+are distinct from published experimental prereleases under GitHub Releases.
+Intel/Windows 4D acceptance and actual published installation
 remain separate checks. Any proposed compiler-baseline change requires a
 separate explicit decision.
 
@@ -287,7 +288,7 @@ python3 scripts/ci_config.py download-tool4d --root .
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/compile_component.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/package_component.py --root . --repository miyako/CMYK \
-  --tag v0.1.0 --unpack-test
+  --tag v0.1.0-rc.1 --unpack-test
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d \
   --component build/release-test/CMYK.4dbase
 ```
@@ -313,6 +314,18 @@ Intel/Windows 4D evidence. The unsigned artifact/evidence pair is
 No signing, notarization, publication or download/install success is implied.
 
 ## Installation after a validated release
+
+The unsigned experimental publication workflow accepts **prerelease SemVer tags
+only**, initially `v0.1.0-rc.1`, matching both manifests and the bundled CLI.
+After the release setup is reviewed and merged, explicitly set the repository
+Actions variable `FOURD_ENABLED=true`, then create/push the approved matching tag.
+The workflow rebuilds all native targets and runs strict source, compiler and
+exact unpacked compiled-host acceptance before publishing. It creates the GitHub
+release atomically with `--prerelease --latest=false`; stable tags are rejected.
+No signing or notarization is implied. `CMYK.acceptance.json` and
+`CMYK.native-evidence.json` accompany `CMYK.zip` and retain untested platform
+checks and `release_ready:false`. Publication requires separate explicit approval;
+merging source changes alone is not permission to tag or publish.
 
 In the host Dependency manager, add GitHub repository
 `miyako/CMYK` and a published matching version tag.

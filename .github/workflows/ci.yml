@@ -136,6 +136,7 @@ jobs:
           set -o pipefail
           python scripts/accept_local.py --root . --repository "$GITHUB_REPOSITORY" \
             --tool4d .tools/tool4d.app/Contents/MacOS/tool4d 2>&1 | tee build/4d-acceptance.log
+          python scripts/publish_prerelease.py --write-native-evidence
       - name: Capture one component-free shutdown probe after acceptance failure
         if: failure() && steps.acceptance.outcome == 'failure'
         shell: python
@@ -176,6 +177,7 @@ jobs:
           path: |
             dist/*.zip
             dist/*.acceptance.json
+            dist/*.native-evidence.json
             build/acceptance.json
             build/4d-acceptance.log
             build/host-status.json

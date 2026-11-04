@@ -68,47 +68,46 @@ jobs:
       - run: python scripts/ci_config.py validate --release --tag "$RELEASE_TAG"
       - uses: actions/download-artifact@v4
         with:
-          name: component-resources
-          path: build/resources
-      - name: Restore validated native resources
-        shell: python
-        run: |
-          import pathlib, shutil, sys
-          sys.path.insert(0, "scripts")
-          from ci_config import load_config
-          from package_component import validate_resources
-          config = load_config(initialized=True)
-          component = pathlib.Path("component") / config["repository"]
-          destination = component / "Resources" / "bin"
-          shutil.copytree("build/resources", destination, dirs_exist_ok=True)
-          mac, windows = validate_resources(component, config["cli"])
-          mac.chmod(0o755)
-          windows.chmod(0o755)
+          name: cli-macos-x64
+          path: build/macos-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-macos-arm64
+          path: build/macos-arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-windows-x64
+          path: build/windows-x64
       - name: Download SHA-256-verified tool4D
         run: python scripts/ci_config.py download-tool4d
-      - name: Test interpreted component from a real 4D host before compilation
-        run: python scripts/test_4d.py --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
-      - name: Compile both 4D targets (no source-only fallback)
-        run: python scripts/compile_component.py --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
-      - name: Package unsigned compiled dependency-manager component
-        run: python scripts/package_component.py --tag "$RELEASE_TAG" --unpack-test
-      - name: Require real host tests against the actual compiled release component
-        shell: python
+      - name: Require source, compiler and exact unpacked compiled-host acceptance
+        shell: bash
         run: |
-          import pathlib, subprocess, sys
-          sys.path.insert(0, "scripts")
-          from ci_config import load_config
-          config = load_config(initialized=True)
-          component = pathlib.Path("build/release-test") / (config["repository"] + ".4dbase")
-          subprocess.run([sys.executable, "scripts/test_4d.py", "--tool4d",
-                          ".tools/tool4d.app/Contents/MacOS/tool4d",
-                          "--component", str(component)], check=True)
+          set -o pipefail
+          python scripts/accept_local.py --root . --repository "$GITHUB_REPOSITORY" \
+            --tool4d .tools/tool4d.app/Contents/MacOS/tool4d 2>&1 | tee build/release-acceptance.log
+          python scripts/publish_prerelease.py --write-native-evidence
       - uses: actions/upload-artifact@v4
         with:
           name: compiled-release
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.acceptance.json
+            dist/*.native-evidence.json
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
+      - name: Preserve raw release evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence
+          path: |
+            build/acceptance.json
+            build/*-status.json
+            build/release-acceptance.log
+            build/*/build-manifest.json
+          if-no-files-found: warn
+          retention-days: 30
 
   publish:
     needs: [gate, compile]
@@ -135,4 +134,4 @@ jobs:
         run: |
           git fetch --force --no-tags origin "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
           python scripts/release_ref.py verify --tag "$RELEASE_TAG" --expected-sha "$RELEASE_SHA"
-          gh release create "$RELEASE_TAG" dist/*.zip --verify-tag --title "$RELEASE_TAG" --notes "Unsigned compiled component with universal macOS and x64 Windows CLI resources. Interpreted class and method sources are excluded. This artifact is not signed or notarized. Built with the free tool4D compiler from an explicitly SHA-256-pinned download."
+          python scripts/publish_prerelease.py --tag "$RELEASE_TAG" --expected-sha "$RELEASE_SHA"

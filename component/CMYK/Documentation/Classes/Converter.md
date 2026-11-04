@@ -9,7 +9,7 @@ native Windows ARM64 is unsupported.
 | --- | --- |
 | `inspectFile(file : 4D.File) : Object` | Image dimensions, model, channels, format, DPI, orientation and embedded ICC information |
 | `convertFile(source : 4D.File; destination : 4D.File; options : Object) : Object` | ICC-managed CMYK TIFF/JPEG conversion and selected profiles |
-| `version() : Object` | `{protocol:1,version:"0.1.0"}` |
+| `version() : Object` | `{protocol:1,version:"0.1.0-rc.1"}` |
 
 These are synchronous, separate-process calls with closed stdin and a finite
 30-second timeout. There is no shared mutable conversion state or asynchronous

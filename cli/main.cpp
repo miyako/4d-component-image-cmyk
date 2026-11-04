@@ -17,7 +17,7 @@ int run(const std::vector<std::string>& args) {
             if (!validUtf8(a) || a.find('\0') != std::string::npos)
                 throw Error("invalid_arguments", "arguments must be valid UTF-8 without NUL");
         if (args == std::vector<std::string>{"--version"}) {
-            std::cout << Json({{"protocol", 1}, {"version", "0.1.0"}}).dump() << '\n';
+            std::cout << Json({{"protocol", 1}, {"version", IMAGE_CMYK_VERSION}}).dump() << '\n';
             return 0;
         }
         if (args.empty() || (args[0] != "inspect" && args[0] != "convert"))
