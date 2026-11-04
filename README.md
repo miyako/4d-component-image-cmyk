@@ -248,6 +248,24 @@ compiler-baseline change requires a separate explicit decision.
 
 ### Real source and compiled 4D acceptance
 
+For an isolated hosted attempt without changing repository variables, dispatch
+**Actions > CI > Run workflow**, select the implementation branch and enable
+`accept_4d`. From the CLI:
+
+```sh
+gh workflow run ci.yml --ref miyako-cmyk-image-component -f accept_4d=true
+```
+
+This rebuilds all three native targets at the selected commit, then runs the
+existing strict acceptance helper on hosted macOS 15 ARM64. The explicit opt-in
+uses the default `package.json.tool` checksum pin, not repository URL overrides.
+It uploads `four-d-acceptance` containing reports/logs even on failure, and the
+ZIP plus adjacent evidence JSON only if packaging reaches those stages.
+No tag, publication, signing or persistent `FOURD_ENABLED` change is performed.
+A failed process remains a failed job; a single component-free shutdown probe
+is retained after acceptance failure. The helper's `release_ready:false` and
+untested Intel/Windows 4D/install/signing checks must not be relabeled as passed.
+
 The pinned free tool4d in `package.json.tool` is **20.7 build 101905,
 macOS ARM64**. Unsigned local component compilation needs no license activation,
 signing secret or release publication. Do not bundle tool4d.
