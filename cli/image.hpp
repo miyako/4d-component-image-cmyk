@@ -26,7 +26,8 @@ struct Options {
     int quality = 90;
 };
 bool validUtf8(const std::string&);
-std::vector<unsigned char> readFile(const std::filesystem::path&, std::size_t limit);
+std::vector<unsigned char> readFile(const std::filesystem::path&, std::size_t limit,
+                                    const std::string& role = "input");
 Image decode(const std::filesystem::path&);
 Json inspect(const std::filesystem::path&);
 Json convert(const Options&);

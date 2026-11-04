@@ -169,7 +169,12 @@ Errors exit **2**, leave stdout empty and write one stderr object:
 ```
 
 Invalid, missing, duplicate and unknown options are errors, not ignored
-configuration. Messages may depend on the failing operation. The 4D adapter
+configuration. `read_failed` identifies the failing `source`, `sourceProfile`
+or `destinationProfile`, includes its path, and retains available OS error
+category/code/message. A readable image does not imply its separately supplied
+ICC file exists: check the profile File's `.path` and `.exists` too. A missing
+profile never creates the output or modifies the source.
+Messages may depend on the failing operation. The 4D adapter
 quotes literal paths into SystemWorker command-line Text without invoking a
 shell; spaces, Unicode and OS-valid quotes are data. CLI subprocess tests do
 not establish 4D's native quoting behavior; real host tests remain required.

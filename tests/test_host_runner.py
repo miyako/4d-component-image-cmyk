@@ -61,6 +61,15 @@ def valid_status(compiled=False):
         apply_assertions(case, CONTRACT["feature"].get("caseAssertions", []))
     for section in ("feature", "execution"):
         status = apply_assertions(status, CONTRACT[section]["assertions"])
+    for key, role, reason, name in (
+        ("invalid", "source", "cannot inspect file", "missing.png"),
+        ("missingDestinationProfile", "destinationProfile", "cannot inspect file", "missing-destination.icc"),
+        ("missingSourceProfile", "sourceProfile", "cannot inspect file", "missing-source.icc"),
+        ("folderArgument", "source", "not a regular file", "folder"),
+    ):
+        status[key]["stderr"] = json.dumps(
+            {"error": {"code": "read_failed", "message": f"{role}: {reason} '/fixtures/{name}'"},
+             "protocol": 1}, separators=(",", ":")) + "\n"
     assertions = {entry["path"]: entry for entry in CONTRACT["execution"]["assertions"]}
     rejected = assertions["/rejectedArguments"]["each"][0]["equals"]
     status["rejectedArguments"] = [{"type": i, "result": copy.deepcopy(rejected)} for i in range(9)]
@@ -94,6 +103,14 @@ class ContractTests(unittest.TestCase):
             self.assertIs(runner.validate_status(status, CONTRACT, compiled), status)
             with self.assertRaises(ValueError):
                 runner.validate_status(status, CONTRACT, not compiled)
+
+    def test_read_errors_require_correct_file_role_and_name(self):
+        for key in ("invalid", "missingDestinationProfile", "missingSourceProfile", "folderArgument"):
+            for value in ("", "wrong diagnostic\n"):
+                status = valid_status()
+                status[key]["stderr"] = value
+                with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                    runner.validate_status(status, CONTRACT, False)
 
     def test_completion_must_be_literal_true_and_mode_literal_boolean(self):
         for key in ("success", "finished", "compiled"):

@@ -120,6 +120,42 @@ class CppCLI(unittest.TestCase):
     def inspect(self, source):
         return self.success(["inspect", "--source", source])
 
+    def test_read_errors_identify_source_and_profile_paths(self):
+        source, _ = self.untagged_png_and_profile()
+        missing = self.directory / "missing profil \u65e5\u672c 'quoted'.icc"
+        original = (self.fixtures / "input.png").read_bytes()
+        cases = [
+            ("source", ["inspect", "--source", missing]),
+            ("sourceProfile", self.conversion(source=source) + ["--source-profile", missing]),
+            ("destinationProfile", self.conversion(profile=missing)),
+            ("destinationProfile", self.conversion(profile=self.directory)),
+        ]
+        for role, arguments in cases:
+            with self.subTest(role=role, arguments=arguments):
+                result = self.failure(arguments, "read_failed")
+                message = result["error"]["message"]
+                self.assertTrue(message.startswith(role + ": "), message)
+                expected = self.directory if arguments[-1] == self.directory else missing
+                self.assertIn(os.fspath(expected), message)
+                self.assertFalse((self.directory / "output.tif").exists())
+        self.assertEqual((self.fixtures / "input.png").read_bytes(), original)
+
+    @unittest.skipIf(os.name == "nt", "POSIX file-mode permission probe")
+    def test_permission_error_preserves_os_diagnostic(self):
+        if os.geteuid() == 0:
+            self.skipTest("root can read files regardless of POSIX permission bits")
+        denied = self.directory / "denied.png"
+        shutil.copyfile(self.fixtures / "input.png", denied)
+        denied.chmod(0)
+        try:
+            value = self.failure(["inspect", "--source", denied], "read_failed")
+            message = value["error"]["message"]
+            self.assertTrue(message.startswith("source: cannot open file "), message)
+            self.assertIn(os.fspath(denied), message)
+            self.assertRegex(message, r"OS error [a-z]+:[1-9][0-9]*")
+        finally:
+            denied.chmod(0o600)
+
     def assert_image(self, value, color_space, image_format):
         self.assertIs(type(value["width"]), int)
         self.assertIs(type(value["height"]), int)

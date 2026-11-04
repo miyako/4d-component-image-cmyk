@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -31,6 +32,17 @@ constexpr std::size_t maxInput = 256u * 1024u * 1024u;
 constexpr std::size_t maxICC = 32u * 1024u * 1024u;
 constexpr std::uint64_t maxPixels = 40000000;
 [[noreturn]] void fail(const std::string& code, const std::string& message) { throw Error(code, message); }
+[[noreturn]] void readFailure(const std::filesystem::path& path, const std::string& role,
+                              const std::string& reason, const std::error_code& error = {}) {
+    std::string message = role + ": " + reason + " '" + path.u8string() + "'";
+    if (error) {
+        message += " (OS error " + std::string(error.category().name()) + ":" + std::to_string(error.value());
+        const auto description = error.message();
+        if (validUtf8(description)) message += ": " + description;
+        message += ")";
+    }
+    fail("read_failed", message);
+}
 std::size_t pixelSize(std::uint32_t w, std::uint32_t h, unsigned c) {
     const std::uint64_t pixels = std::uint64_t(w) * h;
     if (!w || !h || pixels > maxPixels || c < 3 || c > 4 || pixels * c > maxInput)
@@ -471,22 +483,29 @@ bool validUtf8(const std::string& s) {
     }
     return true;
 }
-std::vector<unsigned char> readFile(const std::filesystem::path& path, std::size_t limit) {
+std::vector<unsigned char> readFile(const std::filesystem::path& path, std::size_t limit,
+                                  const std::string& role) {
     std::error_code ec;
-    if (!std::filesystem::is_regular_file(path, ec)) fail("read_failed", "input is not a readable regular file");
+    const auto status = std::filesystem::status(path, ec);
+    if (ec) readFailure(path, role, "cannot inspect file", ec);
+    if (!std::filesystem::is_regular_file(status))
+        readFailure(path, role, status.type() == std::filesystem::file_type::not_found
+                    ? "file does not exist" : "not a regular file");
     const auto size = std::filesystem::file_size(path, ec);
-    if (ec) fail("read_failed", "cannot determine input size");
+    if (ec) readFailure(path, role, "cannot determine file size", ec);
     if (size > limit) fail("input_limit", "input file exceeds byte limit");
+    errno = 0;
     std::ifstream in(path, std::ios::binary);
-    if (!in) fail("read_failed", "cannot open input file");
+    const auto openError = errno;
+    if (!in) readFailure(path, role, "cannot open file", std::error_code(openError, std::generic_category()));
     std::vector<unsigned char> bytes(static_cast<std::size_t>(size));
     if (size && !in.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size)))
-        fail("read_failed", "cannot read complete input");
-    if (in.peek() != std::char_traits<char>::eof()) fail("read_failed", "input changed while reading");
+        readFailure(path, role, "cannot read complete file");
+    if (in.peek() != std::char_traits<char>::eof()) readFailure(path, role, "file changed while reading");
     return bytes;
 }
 Image decode(const std::filesystem::path& path) {
-    const auto data = readFile(path, maxInput);
+    const auto data = readFile(path, maxInput, "source");
     Image out;
     if (data.size() >= 2 && data[0] == 255 && data[1] == 216) out = decodeJpeg(data);
     else if (data.size() >= 8 && !png_sig_cmp(data.data(), 0, 8)) out = decodePng(data);
@@ -598,7 +617,7 @@ Json convert(const Options& o) {
     if (!im.icc.empty()) {
         source = profile(im.icc); sourceBytes = im.icc.size(); origin = "embedded";
     } else if (!o.sourceProfile.empty()) {
-        auto data = readFile(o.sourceProfile, maxICC); sourceBytes = data.size(); source = profile(data); origin = "supplied";
+        auto data = readFile(o.sourceProfile, maxICC, "sourceProfile"); sourceBytes = data.size(); source = profile(data); origin = "supplied";
     } else if (im.channels == 3 && o.assumeSRGB) {
         source.reset(cmsCreate_sRGBProfile());
         if (!source) fail("invalid_profile", "cannot create sRGB profile");
@@ -606,7 +625,7 @@ Json convert(const Options& o) {
     } else fail("missing_source_profile", "untagged images require a source profile; only RGB may explicitly assume sRGB");
     if ((cmsGetColorSpace(source.get()) == cmsSigCmykData ? 4u : 3u) != im.channels)
         fail("profile_mismatch", "source profile color space does not match image channels");
-    const auto destBytes = readFile(o.destinationProfile, maxICC);
+    const auto destBytes = readFile(o.destinationProfile, maxICC, "destinationProfile");
     auto dest = profile(destBytes);
     if (cmsGetColorSpace(dest.get()) != cmsSigCmykData) fail("profile_mismatch", "destination profile must be CMYK");
     const auto intent = intents.at(o.intent);
