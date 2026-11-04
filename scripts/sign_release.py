@@ -547,7 +547,7 @@ def verify_signature(path, team, arches=None, runtime=True, certificate_sha1=Non
                 require(value == {}, "payload entitlements prohibited")
         if certificate_sha1 is not None:
             prefix = scratch / ("signature-leaf-" + (arch or "container"))
-            command = ["/usr/bin/codesign", "--display", "--extract-certificates", str(prefix)]
+            command = ["/usr/bin/codesign", "--display", "--extract-certificates=" + str(prefix)]
             if arch:
                 command += ["--arch", arch]
             run("extract signing leaf certificate", [*command, str(path)])
