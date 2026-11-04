@@ -166,10 +166,17 @@ class ReleaseRefTests(unittest.TestCase):
         self.assertIn("release_call: true", release)
         self.assertEqual(release.count("ref: ${{ needs.gate.outputs.source_sha }}"), 2)
         self.assertEqual(release.count('validate --release --tag "$RELEASE_TAG"'), 2)
-        self.assertIn('package_component.py --tag "$RELEASE_TAG" --unpack-test', release)
-        self.assertLess(release.index("release_ref.py verify"), release.index("gh release create"))
+        self.assertIn('scripts/accept_local.py --root . --repository "$GITHUB_REPOSITORY"', release)
+        self.assertIn("set -o pipefail", release)
+        self.assertIn("scripts/publish_prerelease.py --write-native-evidence", release)
+        self.assertIn("dist/*.acceptance.json", release)
+        self.assertIn("dist/*.native-evidence.json", release)
+        self.assertLess(release.index("release_ref.py verify"),
+                        release.index('publish_prerelease.py --tag "$RELEASE_TAG"'))
         self.assertIn('git fetch --force --no-tags origin "+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"', release)
-        self.assertIn("--verify-tag", release)
+        publisher = (ROOT / "scripts/publish_prerelease.py").read_text(encoding="utf-8")
+        for flag in ("--verify-tag", "--prerelease", "--latest=false"):
+            self.assertIn(flag, publisher)
 
 
 if __name__ == "__main__":
