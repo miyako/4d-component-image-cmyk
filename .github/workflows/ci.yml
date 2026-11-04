@@ -70,11 +70,11 @@ jobs:
       - name: Select Rust 1.99.1
         if: matrix.language == 'rust'
         run: rustup default 1.99.1
-      - name: Selected CLI contract tests
-        run: python -m unittest discover -s tests -p test_cli.py -v
       - name: Native build and protocol smoke tests
         run: python scripts/build_cli.py --target "$CLI_TARGET" --language "$CLI_LANGUAGE"
         shell: bash
+      - name: Selected CLI integration tests
+        run: python -m unittest discover -s tests -p test_cli.py -v
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.target }}

@@ -81,6 +81,31 @@ def require_toolchain(language):
         raise ValueError(f"{language} {'.'.join(map(str, minimum))} or newer is required")
 
 
+def audit_native_dependencies(executable, target, compiler=None):
+    if target.startswith("macos-"):
+        output = subprocess.run(["otool", "-L", str(executable)], check=True,
+                                capture_output=True, text=True).stdout
+        libraries = [line.strip().split(" (", 1)[0] for line in output.splitlines()
+                     if " (compatibility version " in line]
+        if not libraries or any(not item.startswith(("/usr/lib/", "/System/Library/"))
+                                for item in libraries):
+            raise ValueError("native CLI has missing or unbundled non-system macOS dependencies")
+    else:
+        dumpbin = Path(compiler).with_name("dumpbin.exe")
+        if not dumpbin.is_file():
+            raise ValueError("MSVC dumpbin is required for native Windows dependency inspection")
+        output = subprocess.run([str(dumpbin), "/DEPENDENTS", str(executable)], check=True,
+                                capture_output=True, text=True).stdout
+        libraries = re.findall(r"^\s+([A-Za-z0-9_.-]+\.dll)\s*$", output, re.MULTILINE | re.IGNORECASE)
+        allowed = {"KERNEL32.DLL", "USER32.DLL", "ADVAPI32.DLL", "SHELL32.DLL",
+                   "OLE32.DLL", "OLEAUT32.DLL", "WS2_32.DLL", "BCRYPT.DLL",
+                   "NTDLL.DLL", "SHLWAPI.DLL", "GDI32.DLL", "COMDLG32.DLL"}
+        if not libraries or any(item.upper() not in allowed for item in libraries):
+            raise ValueError("native CLI has missing or unreviewed Windows DLL dependencies: "
+                             + repr(libraries))
+    return libraries
+
+
 def build(root, target, language=None, cross=False):
     root = Path(root).resolve()
     config = load_config(root, initialized=True, repository=os.environ.get("GITHUB_REPOSITORY"))
@@ -120,17 +145,36 @@ def build(root, target, language=None, cross=False):
         env["CARGO_TARGET_DIR"] = str(output / "cargo")
         commands = [["cargo", "build", "--release", "--locked"]]
     else:
+        from build_dependencies import build as build_dependencies
+        prefix, dependencies = build_dependencies(root, target)
+        toolchain = subprocess.run(
+            ["cmake", "--version"], check=True, capture_output=True, text=True).stdout.splitlines()[0]
         architecture_options = (
             ["-A", "x64"] if target == "windows-x64" else
             ["-DCMAKE_OSX_ARCHITECTURES=" + ("arm64" if target == "macos-arm64" else "x86_64")])
         commands = [
             ["cmake", "-S", str(source), "-B", str(output / "cmake"),
              "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_CXX_STANDARD=17", "-DCMAKE_CXX_EXTENSIONS=OFF",
+             "-DIMAGE_DEPENDENCY_PREFIX=" + str(prefix),
+             "-DLCMS_SOURCE=" + str(dependencies["lcms"]),
+             "-DJSON_SOURCE=" + str(dependencies["json"]),
              *architecture_options],
             ["cmake", "--build", str(output / "cmake"), "--config", "Release"],
         ]
     for command in commands:
         subprocess.run(command, cwd=source, env=env, check=True, timeout=600)
+    if selected == "cpp":
+        metadata = list((output / "cmake/CMakeFiles").glob("*/CMakeCXXCompiler.cmake"))
+        if len(metadata) != 1:
+            raise ValueError("CMake compiler identity is missing or ambiguous")
+        compiler = metadata[0].read_text()
+        identity = []
+        for field in ("CMAKE_CXX_COMPILER", "CMAKE_CXX_COMPILER_ID", "CMAKE_CXX_COMPILER_VERSION"):
+            match = re.search(r'set\(' + field + r' "([^"]+)"\)', compiler)
+            if not match:
+                raise ValueError("CMake did not record " + field)
+            identity.append(match.group(1))
+        toolchain += "; " + " ".join(identity)
     if target == native:
         if selected == "go":
             subprocess.run(["go", "test", "./..."], cwd=source, env=env, check=True, timeout=600)
@@ -150,6 +194,9 @@ def build(root, target, language=None, cross=False):
             raise ValueError("CMake did not produce the configured executable")
         shutil.copyfile(built, executable)
     executable.chmod(0o755)
+    runtime = None
+    if selected == "cpp":
+        runtime = audit_native_dependencies(executable, target, identity[0])
     if source_digest(root) != original_digest:
         raise ValueError("CLI inputs changed during build")
     if target == native:
@@ -157,7 +204,11 @@ def build(root, target, language=None, cross=False):
         if not contract.is_file():
             raise ValueError("tests/cli-contract.json is required; define feature smoke vectors")
         smoke_test(executable, config["version"], contract)
-    record(root, target, executable, target == native, toolchain)
+    dependencies = None
+    if selected == "cpp":
+        dependencies = json.loads((root / "build/dependencies" / target / "build.json").read_text())
+        dependencies["runtime_libraries"] = runtime
+    record(root, target, executable, target == native, toolchain, dependencies)
     return executable
 
 

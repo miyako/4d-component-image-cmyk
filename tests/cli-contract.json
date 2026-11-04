@@ -2,9 +2,13 @@
   "schema": 1,
   "cases": [
     {"args": ["--version"], "exitCode": 0, "stdout": {"protocol": 1, "version": "$VERSION"}, "stderr": ""},
-    {"args": ["greet", "--name", "世界 café"], "exitCode": 0, "stdout": {"protocol": 1, "message": "Hello, 世界 café!"}, "stderr": ""},
-    {"args": ["greet", "--name", "quote\" slash\\\n"], "exitCode": 0, "stdout": {"protocol": 1, "message": "Hello, quote\" slash\\\n!"}, "stderr": ""},
-    {"args": ["greet", "--name", ""], "exitCode": 2, "stdout": "", "stderr": {"protocol": 1, "error": {"code": "invalid_arguments", "message": "expected greet --name <non-empty UTF-8 name> or --version"}}},
-    {"args": ["unknown"], "exitCode": 2, "stdout": "", "stderr": {"protocol": 1, "error": {"code": "invalid_arguments", "message": "expected greet --name <non-empty UTF-8 name> or --version"}}}
+    {
+      "args": ["inspect", "--source", "tests/fixtures/input.png"],
+      "exitCode": 0,
+      "stdoutPattern": "(?=[^\\n]*\"protocol\":1[,}])(?=[^\\n]*\"width\":8[,}])(?=[^\\n]*\"height\":6[,}])(?=[^\\n]*\"channels\":3[,}])(?=[^\\n]*\"colorSpace\":\"RGB\")(?=[^\\n]*\"bitDepth\":8[,}])(?=[^\\n]*\"alpha\":false)(?=[^\\n]*\"format\":\"png\")\\{[^\\n]+\\}\\n",
+      "stderr": ""
+    },
+    {"args": ["inspect"], "exitCode": 2, "stdout": "", "stderr": {"error": {"code": "invalid_arguments", "message": "missing --source"}, "protocol": 1}},
+    {"args": ["unknown"], "exitCode": 2, "stdout": "", "stderr": {"error": {"code": "invalid_arguments", "message": "expected inspect, convert or --version"}, "protocol": 1}}
   ]
 }

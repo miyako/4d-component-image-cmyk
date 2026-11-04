@@ -17,10 +17,22 @@ CONTRACT = json.loads((ROOT / "tests/host/contract.json").read_text(encoding="ut
 
 
 def valid_status(compiled=False):
+    profile = {"colorSpace": "RGB", "description": "synthetic regression profile", "bytes": 588}
+    payload = {"protocol": 1, "width": 8, "height": 6, "channels": 3,
+               "colorSpace": "RGB", "bitDepth": 8, "alpha": False, "format": "png",
+               "orientation": 1, "dpiX": 144, "dpiY": 72,
+               "embeddedProfile": {"present": True, **profile},
+               "sourceProfile": {"origin": "embedded", **profile},
+               "destinationProfile": {**profile, "colorSpace": "CMYK"}, "warnings": []}
+    envelope = {"ok": True, "stdout": json.dumps(payload, separators=(",", ":")) + "\n",
+                "stderr": "", "exitCode": 0}
+    cases = [{"ok": True, **copy.deepcopy(case)} for case in CONTRACT["feature"].get("cases", [])]
+    if "caseCount" in CONTRACT["feature"]:
+        cases = [{**copy.deepcopy(envelope), "value": copy.deepcopy(payload)}
+                 for _ in range(CONTRACT["feature"]["caseCount"])]
     status = {"success": True, "finished": True, "compiled": compiled,
-              "cases": [{"ok": True, **copy.deepcopy(case)} for case in CONTRACT["feature"]["cases"]],
-              "fileArgument": {"ok": True, "stdout": "file round trip", "stderr": "", "exitCode": 0},
-              "folderArgument": {"ok": True, "stdout": "folder round trip", "stderr": "", "exitCode": 0}}
+              "cases": cases, "fileArgument": copy.deepcopy(envelope),
+              "renamedInspect": copy.deepcopy(envelope)}
     def apply_assertions(value, assertions):
         for assertion in assertions:
             tokens = assertion["path"].split("/")[1:]
@@ -40,6 +52,8 @@ def valid_status(compiled=False):
                 destination[key] = [apply_assertions(entry, assertion["each"]) for entry in destination[key]]
         return value
 
+    for case in status["cases"]:
+        apply_assertions(case, CONTRACT["feature"].get("caseAssertions", []))
     for section in ("feature", "execution"):
         status = apply_assertions(status, CONTRACT[section]["assertions"])
     assertions = {entry["path"]: entry for entry in CONTRACT["execution"]["assertions"]}
@@ -186,7 +200,7 @@ class ContractTests(unittest.TestCase):
         status = valid_status()
         status["fileArgument"]["stderr"] = "diagnostic, not a failure"
         runner.validate_status(status, CONTRACT, False)
-        status["folderArgument"]["error"] = {"code": "hidden_failure"}
+        status["renamedInspect"]["error"] = {"code": "hidden_failure"}
         with self.assertRaises(ValueError):
             runner.validate_status(status, CONTRACT, False)
 
@@ -204,13 +218,31 @@ class ContractTests(unittest.TestCase):
         status["invalidDocument"] = {"ok": False, "exitCode": 3, "error": {"code": "invalid_document"}}
         runner.validate_status(status, contract, False)
 
+    def test_exact_case_contract_requires_every_expected_output_field(self):
+        case = {"stdout": "converted\n", "stderr": "", "exitCode": 0, "value": {"channels": 4}}
+        contract = {"schema": 1, "feature": {
+            "casesPath": "/cases", "cases": [copy.deepcopy(case)],
+            "assertions": [{"path": "/invalid/ok", "equals": False}]},
+            "execution": {"successPaths": [],
+                          "assertions": [{"path": "/invalid/ok", "equals": False}]}}
+        status = {"success": True, "finished": True, "compiled": False,
+                  "cases": [{"ok": True, **case}], "invalid": {"ok": False}}
+        runner.validate_status(status, contract, False)
+        for field in ("stdout", "stderr", "exitCode", "value"):
+            malformed = copy.deepcopy(contract)
+            del malformed["feature"]["cases"][0][field]
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "cases require"):
+                runner.validate_status(status, malformed, False)
+
     def test_contract_malformed_and_empty_sections_fail_closed(self):
         for mutation in (
                 lambda c: c.update(schema=True),
                 lambda c: c["feature"].update(cases=[]),
                 lambda c: c["feature"].update(assertions=[]),
                 lambda c: c["execution"].update(assertions=[]),
-                lambda c: c["feature"]["cases"][0].pop("value"),
+                lambda c: c["feature"].update(caseCount=0),
+                lambda c: c["feature"].update(caseCount=True),
+                lambda c: c["feature"].update(caseAssertions=[]),
                 lambda c: c["execution"].update(successPaths=None),
                 lambda c: c["execution"]["assertions"].append({"path": "/success", "equal": True})):
             contract = copy.deepcopy(CONTRACT)
@@ -235,6 +267,10 @@ class HostRunnerTests(unittest.TestCase):
         self.config = config
         (self.root / "template.json").write_text(json.dumps(config), encoding="utf-8")
         shutil.copytree(ROOT / "tests/host", self.root / "tests/host")
+        fixtures = self.root / "tests/fixtures"
+        fixtures.mkdir()
+        for name in ("input.png", "input.tif", "input.jpg", "destination.icc"):
+            (fixtures / name).write_bytes(("synthetic regression fixture: " + name).encode("utf-8"))
         source = self.root / "component" / config["repository"]
         source.mkdir(parents=True)
         (source / "marker").write_text("source", encoding="utf-8")
@@ -250,7 +286,7 @@ class HostRunnerTests(unittest.TestCase):
     def fake_host(self, args, **kwargs):
         self.assertIsInstance(args, list)
         self.assertNotIn("shell", kwargs)
-        self.assertEqual(kwargs, {"check": True, "timeout": 120})
+        self.assertEqual(kwargs, {"check": False, "timeout": 120})
         self.assertIn("--startup-method=Smoke", args)
         request_path = Path(next(arg.split("=", 1)[1] for arg in args if arg.startswith("--user-param=")))
         self.assertIn("日本語", str(request_path))
@@ -274,6 +310,15 @@ class HostRunnerTests(unittest.TestCase):
         self.assertEqual(Path(request["executable"]).parent, host)
         self.assertEqual(Path(request["executable"]).read_bytes(), b"unit test native resource")
         self.assertEqual(Path(request["status"]).parent, host)
+        fixtures = Path(request["fixtureDirectory"])
+        self.assertEqual(fixtures.parent, host)
+        self.assertIn("日本語", fixtures.name)
+        self.assertIn(" ", fixtures.name)
+        self.assertEqual("'" in fixtures.name, runner.os.name != "nt")
+        self.assertEqual('"' in fixtures.name, runner.os.name != "nt")
+        for name in ("input.png", "input.tif", "input.jpg", "destination.icc"):
+            self.assertEqual((fixtures / name).read_bytes(),
+                             (self.root / "tests/fixtures" / name).read_bytes())
         self.assertEqual((host / "Components" / (self.config["repository"] + ".4dbase") / "marker").read_text(),
                          "release" if request["expectCompiled"] else "source")
         if not request["expectCompiled"]:
@@ -281,6 +326,7 @@ class HostRunnerTests(unittest.TestCase):
                               "Project/DerivedData").exists())
         Path(request["status"]).write_text(json.dumps(valid_status(request["expectCompiled"])),
                                           encoding="utf-8")
+        return subprocess.CompletedProcess(args, 0)
 
     def run_host(self, component=None):
         return runner.test_4d(self.root, "/fake/tool4d", component)
@@ -306,7 +352,8 @@ class HostRunnerTests(unittest.TestCase):
     def test_missing_output_cannot_reuse_stale_status(self):
         self.output.parent.mkdir()
         self.output.write_text(json.dumps(valid_status()))
-        with patch.object(runner.subprocess, "run"), self.assertRaisesRegex(ValueError, "did not write"):
+        with patch.object(runner.subprocess, "run", return_value=subprocess.CompletedProcess(["tool4d"], 0)), \
+                self.assertRaisesRegex(ValueError, "did not write"):
             self.run_host()
         self.assertFalse(self.output.exists())
         self.assertEqual(list(self.output.parent.glob("4D host *")), [])
@@ -317,6 +364,7 @@ class HostRunnerTests(unittest.TestCase):
             def malformed(args, **kwargs):
                 request = json.loads(Path(next(a.split("=", 1)[1] for a in args if a.startswith("--user-param="))).read_text())
                 Path(request["status"]).write_text(text)
+                return subprocess.CompletedProcess(args, 0)
             with self.subTest(text=text), patch.object(runner.subprocess, "run", side_effect=malformed):
                 with self.assertRaises(ValueError):
                     self.run_host()
@@ -328,6 +376,30 @@ class HostRunnerTests(unittest.TestCase):
                 self.run_host()
         self.assertEqual(list(self.output.parent.glob("4D host *")), [])
 
+    def test_nonzero_process_preserves_fresh_status_but_never_passes(self):
+        for returncode in (1, -11):
+            def crashed(args, **kwargs):
+                completed = self.fake_host(args, **kwargs)
+                completed.returncode = returncode
+                return completed
+            with self.subTest(returncode=returncode), \
+                    patch.object(runner.subprocess, "run", side_effect=crashed):
+                with self.assertRaises(subprocess.CalledProcessError) as error:
+                    self.run_host()
+                self.assertEqual(error.exception.returncode, returncode)
+            self.assertEqual(json.loads(self.output.read_text()), valid_status())
+            self.assertEqual(list(self.output.parent.glob("4D host *")), [])
+
+    def test_nonzero_process_without_status_cannot_reuse_previous_report(self):
+        self.output.parent.mkdir()
+        self.output.write_text(json.dumps(valid_status()))
+        with patch.object(runner.subprocess, "run",
+                          return_value=subprocess.CompletedProcess(["tool4d"], -11)):
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.run_host()
+        self.assertFalse(self.output.exists())
+        self.assertEqual(list(self.output.parent.glob("4D host *")), [])
+
     def test_uninitialized_template_remains_forbidden(self):
         self.config["initialized"] = False
         (self.root / "template.json").write_text(json.dumps(self.config))
@@ -336,7 +408,7 @@ class HostRunnerTests(unittest.TestCase):
         run.assert_not_called()
 
     def test_symlink_inputs_rejected_before_launch(self):
-        for base in (self.source, self.root / "tests/host"):
+        for base in (self.source, self.root / "tests/host", self.root / "tests/fixtures"):
             link = base / "unsafe"
             link.symlink_to(self.root / "template.json")
             with patch.object(runner.subprocess, "run") as run, self.assertRaisesRegex(ValueError, "symlinks"):
