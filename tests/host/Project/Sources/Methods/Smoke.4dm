@@ -87,6 +87,10 @@ If (Not($result.ok))
 End if
 HOST_Phase:="feature errors"
 $report.invalid:=$tool.inspectFile($fixtures.file("missing.png"))
+$destination:=$fixtures.file("missing-profile-output.tif")
+$report.missingDestinationProfile:=$tool.convertFile($source; $destination; New object("destinationProfile"; $fixtures.file("missing-destination.icc")))
+$report.missingSourceProfile:=$tool.convertFile($fixtures.file("untagged.png"); $destination; New object("destinationProfile"; $profile; "sourceProfile"; $fixtures.file("missing-source.icc")))
+$report.missingProfileOutputExists:=$destination.exists
 $report.profileOverride:=$tool.convertFile($source; $fixtures.file("override.tif"); New object("destinationProfile"; $profile; "sourceProfile"; $profile))
 $report.invalidOptions:=New collection
 For each ($invalid; New collection(Null; New object; New object("destinationProfile"; $profile; "allowAssumeSRGB"; "true"); New object("destinationProfile"; $profile; "blackPointCompensation"; 1); New object("destinationProfile"; $profile; "intent"; "invalid"); New object("destinationProfile"; $profile; "format"; "png"); New object("destinationProfile"; $profile; "quality"; 0); New object("destinationProfile"; $profile; "quality"; 1.5); New object("destinationProfile"; $profile; "quality"; 101); New object("destinationProfile"; $profile; "sourceProfile"; Null)))

@@ -109,7 +109,12 @@ Failure is `{ok:false,error:{code,message{,details}}}`. Available stdout, stderr
 and exitCode remain separate; prelaunch validation/resource failures do not
 invent an exitCode. A nonzero native status (currently `2`) returns `cli_error`;
 the native JSON stderr contains the feature-specific diagnostic. Nonempty stderr
-alone is not failure. Other generic codes are `missing_executable`,
+alone is not failure. Native `read_failed` messages distinguish `source`,
+`sourceProfile` and `destinationProfile`, include the failing path, and preserve
+available OS error category/code/message. Check the ICC File's `.path` and
+`.exists`, not only the image's: `inspectFile(source)` can succeed while
+`convertFile` fails because the supplied profile is missing or unreadable.
+Other generic codes are `missing_executable`,
 `unsupported_platform`, `unsupported_architecture`, `invalid_argument`,
 `launch_failed`, `process_error`, `process_terminated`, and `invalid_protocol`.
 Local error handlers are restored immediately after narrow JSON parsing and
