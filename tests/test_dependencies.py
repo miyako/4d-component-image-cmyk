@@ -61,6 +61,14 @@ class DependencyTests(unittest.TestCase):
             library.write_bytes(b"changed")
             self.assertNotEqual(original, build_dependencies.static_inventory(root))
 
+    def test_cmake_paths_do_not_emit_windows_escape_sequences(self):
+        windows = PureWindowsPath("D:/a/repository/dependency sources/Little-CMS")
+        for name in ("LCMS_SOURCE", "JSON_SOURCE", "IMAGE_DEPENDENCY_PREFIX",
+                     "CMAKE_INSTALL_PREFIX", "CMAKE_PREFIX_PATH", "ZLIB_LIBRARY"):
+            option = build_dependencies.cmake_path_option(name, windows)
+            self.assertEqual(option, "-D" + name + "=D:/a/repository/dependency sources/Little-CMS")
+            self.assertNotIn("\\", option)
+
     def test_provenance_binds_dependency_build_recipe(self):
         with tempfile.TemporaryDirectory(prefix=".dependency-test-", dir=ROOT) as temporary:
             root = Path(temporary)

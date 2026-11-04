@@ -145,7 +145,7 @@ def build(root, target, language=None, cross=False):
         env["CARGO_TARGET_DIR"] = str(output / "cargo")
         commands = [["cargo", "build", "--release", "--locked"]]
     else:
-        from build_dependencies import build as build_dependencies
+        from build_dependencies import build as build_dependencies, cmake_path_option
         prefix, dependencies = build_dependencies(root, target)
         toolchain = subprocess.run(
             ["cmake", "--version"], check=True, capture_output=True, text=True).stdout.splitlines()[0]
@@ -155,9 +155,9 @@ def build(root, target, language=None, cross=False):
         commands = [
             ["cmake", "-S", str(source), "-B", str(output / "cmake"),
              "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_CXX_STANDARD=17", "-DCMAKE_CXX_EXTENSIONS=OFF",
-             "-DIMAGE_DEPENDENCY_PREFIX=" + str(prefix),
-             "-DLCMS_SOURCE=" + str(dependencies["lcms"]),
-             "-DJSON_SOURCE=" + str(dependencies["json"]),
+             cmake_path_option("IMAGE_DEPENDENCY_PREFIX", prefix),
+             cmake_path_option("LCMS_SOURCE", dependencies["lcms"]),
+             cmake_path_option("JSON_SOURCE", dependencies["json"]),
              *architecture_options],
             ["cmake", "--build", str(output / "cmake"), "--config", "Release"],
         ]

@@ -15,6 +15,10 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def cmake_path_option(name, path):
+    return "-D" + name + "=" + path.as_posix()
+
+
 def regular_path(path):
     if any(item.is_symlink() for item in (path, *path.parents)):
         raise ValueError("dependency paths must not traverse symlinks")
@@ -173,8 +177,8 @@ def build(root, target):
             return prefix, source
     windows = target == "windows-x64"
     common = ["-DCMAKE_BUILD_TYPE=Release", "-DBUILD_SHARED_LIBS=OFF",
-              "-DCMAKE_INSTALL_PREFIX=" + str(prefix),
-              "-DCMAKE_PREFIX_PATH=" + str(prefix),
+              cmake_path_option("CMAKE_INSTALL_PREFIX", prefix),
+              cmake_path_option("CMAKE_PREFIX_PATH", prefix),
               "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
               "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW",
               "-DCMAKE_POLICY_VERSION_MINIMUM=3.10"]
@@ -195,8 +199,8 @@ def build(root, target):
     for name in options:
         if name in ("png", "tiff"):
             options[name] += [
-                "-DZLIB_LIBRARY=" + str(prefix / "lib" / ("zlibstatic.lib" if windows else "libz.a")),
-                "-DZLIB_INCLUDE_DIR=" + str(prefix / "include")]
+                cmake_path_option("ZLIB_LIBRARY", prefix / "lib" / ("zlibstatic.lib" if windows else "libz.a")),
+                cmake_path_option("ZLIB_INCLUDE_DIR", prefix / "include")]
         directory = base / (name + "-" + fingerprint[:12])
         working_source = base / ("source-" + name + "-" + fingerprint[:12])
         if not working_source.exists():
