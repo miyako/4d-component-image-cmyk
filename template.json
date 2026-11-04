@@ -6,6 +6,6 @@
   "cli": "image-cmyk",
   "language": "cpp",
   "feature": "ICC-managed RGB/CMYK image conversion using Little CMS, JPEG, PNG and TIFF",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0",
   "feature_class": "Converter"
 }
