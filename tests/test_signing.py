@@ -330,8 +330,16 @@ class CommandTests(Fixture):
                 self.assertNotIn(secret, str(raised.exception))
         with patch.object(signing.subprocess, "run", return_value=subprocess.CompletedProcess(
                 ["tool", secret], 1, secret.encode(), secret.encode())):
-            with self.assertRaisesRegex(signing.SigningError, "^fixed label: nonzero exit$"):
+            with self.assertRaisesRegex(signing.SigningError, "^fixed label: nonzero exit 1"):
                 signing.run("fixed label", ["tool", secret])
+
+    def test_signing_diagnostic_categories_never_expose_captured_secret_data(self):
+        private = b"PRIVATE-password Developer ID Application: Private Organization"
+        process = subprocess.CompletedProcess([], 1, private, private + b": errSecInternalComponent")
+        with patch.object(signing.subprocess, "run", return_value=process):
+            with self.assertRaisesRegex(signing.SigningError, "keychain or certificate trust failure") as error:
+                signing.run("sign payload code", ["tool", "PRIVATE-password"])
+        self.assertNotIn("PRIVATE", str(error.exception))
 
     def test_subprocess_does_not_inherit_credentials(self):
         with patch.dict(os.environ, {"NOTARYTOOL_PASSWORD": "private", "SAFE": "yes"}), \
@@ -385,6 +393,27 @@ class CleanupTests(Fixture):
             self.assertEqual(signing.cleanup(self.root), {"status": "not_needed"})
             self.assertEqual(signing.cleanup(self.root), {"status": "not_needed"})
             command.assert_not_called()
+
+    def test_search_list_is_journaled_before_import_and_restored_exactly(self):
+        scratch, journal = self.state()
+        original = ["/Users/runner/Library/Keychains/login.keychain-db", "/Library/Keychains/System.keychain"]
+        response = ('    "' + original[0] + '"\n    "' + original[1] + '"\n').encode()
+        with patch.object(signing, "run", return_value=(response, b"")) as command:
+            self.assertEqual(signing.snapshot_keychain_search_list(self.root), original)
+            state = json.loads(journal.read_text())
+            self.assertTrue(state["search_list_changed"])
+            self.assertEqual(state["original_search_list"], original)
+            signing.cleanup(self.root)
+        self.assertEqual(command.call_args.args[1],
+                         ["/usr/bin/security", "list-keychains", "-d", "user", "-s", *original])
+        self.assertFalse(scratch.exists())
+
+    def test_search_list_rejects_malformed_or_relative_paths(self):
+        self.state()
+        for value in (b"", b'"relative.keychain"', b'"/unterminated', b'"/same" "/same"'):
+            with self.subTest(value=value), patch.object(signing, "run", return_value=(value, b"")):
+                with self.assertRaises(signing.SigningError):
+                    signing.snapshot_keychain_search_list(self.root)
 
     def test_cleanup_cli_requires_no_signing_arguments(self):
         output = io.StringIO()
@@ -697,6 +726,8 @@ class PipelineTests(Fixture):
 
         def command(label, args, **kwargs):
             commands.append((label, args, kwargs))
+            if label == "snapshot original keychain search list":
+                return b'"/Users/runner/Library/Keychains/login.keychain-db"\n', b""
             if label == "identify tool4d harness":
                 return b"tool4d 20.7 build 101905\n", b""
             if label == "inspect Gatekeeper policy":

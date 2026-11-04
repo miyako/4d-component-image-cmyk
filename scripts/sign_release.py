@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath
 import platform
 import plistlib
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -63,7 +64,20 @@ def run(label, arguments, *, cwd=None, timeout=120, data=None, env=None):
         raise SigningError(label + ": timeout") from None
     except OSError:
         raise SigningError(label + ": command unavailable") from None
-    require(process.returncode == 0, label + ": nonzero exit")
+    if process.returncode:
+        diagnostic = (process.stdout + process.stderr).decode("utf-8", errors="replace")
+        categories = (
+            ("errSecInternalComponent", "keychain or certificate trust failure"),
+            ("unable to build chain to self-signed root", "certificate chain unavailable"),
+            ("User interaction is not allowed", "noninteractive private-key access denied"),
+            ("The specified item could not be found in the keychain", "keychain item unavailable"),
+            ("The timestamp service is not available", "secure timestamp service unavailable"),
+            ("resource fork, Finder information, or similar detritus", "unsupported filesystem metadata"),
+            ("invalid or unsuitable", "unsuitable signing object"),
+        )
+        hints = [category for token, category in categories if token in diagnostic]
+        hint = "; ".join(hints) if hints else "unclassified command failure"
+        raise SigningError(label + ": nonzero exit " + str(process.returncode) + " (" + hint + ")")
     return process.stdout, process.stderr
 
 
@@ -199,6 +213,26 @@ def cleanup(root):
 def artifact(path):
     regular(path)
     return {"path": path.name, "sha256": sha256(path), "bytes": path.stat().st_size}
+
+
+def snapshot_keychain_search_list(root):
+    out, _ = run("snapshot original keychain search list",
+                 ["/usr/bin/security", "list-keychains", "-d", "user"])
+    try:
+        original = shlex.split(text(out))
+    except ValueError:
+        raise SigningError("invalid original keychain search-list quoting") from None
+    require(original and len(original) == len(set(original))
+            and all(Path(path).is_absolute() and not any(ord(char) < 32 for char in path)
+                    for path in original), "invalid original keychain search list")
+    journal = state_path(root)
+    state = read_json(journal)
+    validate_cleanup_state(root, state)
+    require(state["search_list_changed"] is False, "search list already journaled")
+    # Journal before creation: security create-keychain may itself add an entry.
+    state.update(search_list_changed=True, original_search_list=original)
+    journal.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    return original
 
 
 def preflight(root, tag, expected_sha, env=None, system=None):
@@ -473,7 +507,7 @@ def signing_keychain(scratch, secrets):
                                       secrets["NOTARYTOOL_TEAM_ID"])
         yield keychain, fingerprint
     finally:
-        # Never change the default keychain or user's search list.
+        # The owner restores the journaled search list after removing this keychain.
         try:
             p12.unlink(missing_ok=True)
         finally:
@@ -696,10 +730,15 @@ def production(root, tool4d, tag, expected_sha):
         secrets = {name: os.environ.get(name, "") for name in SECRETS}
         require(all(secrets.values()), "all six signing secrets must be configured")
         stage = "payload_signatures"
+        original_search_list = snapshot_keychain_search_list(root)
         with signing_keychain(scratch, secrets) as (keychain, fingerprint):
             team = secrets["NOTARYTOOL_TEAM_ID"]
             report["certificate_sha1"] = fingerprint
+            run("enable isolated signing keychain search",
+                ["/usr/bin/security", "list-keychains", "-d", "user", "-s",
+                 str(keychain), *original_search_list])
             for name in sorted(CODE):
+                report["active_code_object"] = name
                 run("sign payload code", ["/usr/bin/codesign", "--force", "--sign", fingerprint,
                     "--keychain", str(keychain), "--timestamp", "--options", "runtime", str(payload / name)])
                 verify_signature(payload / name, team, CODE[name], certificate_sha1=fingerprint, scratch=scratch)
@@ -712,6 +751,7 @@ def production(root, tool4d, tag, expected_sha):
                  "sha256": after[name]["sha256"], "certificate_sha1": fingerprint,
                  "team_match": True, "timestamp": True, "hardened_runtime": True}
                 for name in sorted(CODE)])
+            report.pop("active_code_object", None)
             passed(stage)
             signed_zip = scratch / "CMYK.zip"
             repack(payload, signed_zip)
