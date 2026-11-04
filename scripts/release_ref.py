@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 
-from ci_config import ROOT, SEMVER
+from ci_config import ROOT, SEMVER, load_config
 
 
 def validate_tag(tag):
@@ -39,7 +39,24 @@ def verify(root, tag, expected_sha):
     return sha
 
 
-def resolve(root, *, event, ref_type="", ref_name="", version_tag="", event_sha=""):
+def resolve(root, *, event, ref_type="", ref_name="", version_tag="", event_sha="",
+            preflight=False):
+    if preflight:
+        if event != "workflow_dispatch" or ref_type != "branch" or ref_name != "main":
+            raise ValueError("signing preflight requires manual dispatch on reviewed main")
+        if not re.fullmatch(r"[0-9a-f]{40}", event_sha):
+            raise ValueError("preflight requires the full event commit SHA")
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                              capture_output=True, text=True).stdout.strip()
+        remote = subprocess.run(
+            ["git", "ls-remote", "--exit-code", "origin", "refs/heads/main"],
+            cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+        if head != event_sha or remote != event_sha + "\trefs/heads/main":
+            raise ValueError("preflight checkout/event must match current origin/main")
+        tag = validate_tag("v" + load_config(root, initialized=True)["version"])
+        if "-" not in tag[1:].split("+", 1)[0] or version_tag not in ("", tag):
+            raise ValueError("preflight requires the configured matching prerelease version")
+        return {"tag": tag, "sha": event_sha}
     if event == "push":
         if ref_type != "tag":
             raise ValueError("push release events must refer to a tag")
@@ -63,6 +80,7 @@ def main():
     resolver.add_argument("--ref-name", default="")
     resolver.add_argument("--version-tag", default="")
     resolver.add_argument("--event-sha", default="")
+    resolver.add_argument("--preflight", action="store_true")
     verifier = commands.add_parser("verify")
     verifier.add_argument("--tag", required=True)
     verifier.add_argument("--expected-sha", required=True)
@@ -74,13 +92,13 @@ def main():
         else:
             metadata = resolve(args.root, event=args.event, ref_type=args.ref_type,
                                ref_name=args.ref_name, version_tag=args.version_tag,
-                               event_sha=args.event_sha)
+                               event_sha=args.event_sha, preflight=args.preflight)
             output = "".join(f"{key}={value}\n" for key, value in metadata.items())
             if os.environ.get("GITHUB_OUTPUT"):
                 with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as stream:
                     stream.write(output)
             print(output, end="")
-    except (ValueError, OSError) as error:
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f"release_ref: {error}", file=sys.stderr)
         return 1
     return 0

@@ -415,8 +415,10 @@ python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/to
   --component build/release-test/REPOSITORY.4dbase
 ```
 
-1. Source host tests load an isolated component through a real host's
-   `Components/`. The local dependency path names the package root, not the anchor.
+1. The source **tool4d harness** stages the component under the fixture's
+   `Components/`. It directly exercises namespaced calls and process behavior;
+   this does not establish external-component loading in the normal 4D app.
+   The local dependency path names the package root, not the anchor.
    Source staging drops DerivedData to avoid interpreted tests loading stale
    compiled code. Isolated host/request/status paths include Unicode, spaces and
    both quote characters on POSIX (quotes are invalid in Windows filenames);
@@ -437,10 +439,14 @@ python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/to
    **Both ZIP levels need explicit nested directory records**: a generally valid
    ZIP omitting them caused an observed real compiled-component loader crash.
 5. Test the **unpacked ZIP's** `.4dbase`, not the working source folder. The
-   component must report `Is compiled mode=True`. A Python/CLI suite, successful
-   compiler or archive structure check is not evidence of real host loading.
-6. Recompile/repack/retest after any input or signing change. Never accept a
-   stale `host-status.json` or result describing a different package.
+   harness must report `Is compiled mode=True`. Neither this tool4d result,
+   compilation nor archive inspection proves normal 4D application loading;
+   that requires the actual 4D application and exact delivered component.
+6. Recompile/repack/retest after source/input changes. Production signing is a
+   separately inventoried derivative of the verified compiled archive: preserve
+   the original compile marker/manifests, allow changes only to identified Mach-O
+   signatures, and rerun the harness on the exact signed ZIP. Never rewrite a
+   compiler marker to approve altered bytes or reuse stale fixture reports.
 
 The isolated host's `Host_error` method writes raw `Last errors`, the failing
 phase, `success:false` and `finished:false` on an unexpected runtime abort.
@@ -480,8 +486,13 @@ After the dispatch-capable workflow is merged to the **default branch**, open
 `FOURD_ENABLED` still controls optional hosted 4D steps; CLI-only green is not
 compiled-host green.
 
-**Actions → Release compiled component → Run workflow** requires
-`version_tag`, an **already existing** `v<SemVer>` tag matching the initialized
+**Actions → Release compiled component → Run workflow**, with `preflight:true`,
+builds/signs/notarizes reviewed current `main` without creating tags or publishing.
+Run this before pushing a new release tag. The six signing credentials below are
+available only to production release signing, never PR CI.
+
+Ordinary publication requires `version_tag`, an **already existing**
+prerelease `v<SemVer>` tag matching the initialized
 repository's `template.json.version` / `package.json.version`. It creates no
 tag. The gate resolves/peels that tag to a commit SHA, validates source at that
 SHA, and all reusable native CI, assembly, compilation and publication jobs use
@@ -504,10 +515,11 @@ The helper's JSON statuses are strictly `passed` / `failed` / `not_run`.
 | --- | --- | --- |
 | Python / icon checks | Exact command and result | Does not prove 4D loading |
 | Native CLI per target | Execution on that OS/architecture | Cross-built targets remain `not_run` for native execution |
-| Source 4D host | Fresh host report and actual namespaced calls | Only the observed native host |
+| Source tool4d harness | Fresh report, namespaced calls and clean tool process | Not normal 4D application loading |
 | 4D compilation | Fresh success, targets/project and input digest | Not host/package acceptance |
 | ZIP/package integrity | Names, source stripping, modes, explicit directories, libraries | Not runtime loading |
-| Compiled 4D host | Unpacked artifact, fresh report, compiled mode true | Intel/Windows 4D remain separate checks |
+| Compiled tool4d harness | Unpacked artifact, fresh report, compiled mode true | Not normal 4D application loading |
+| Normal 4D application | Actual application installs/loads exact delivered package | Remains `not_run` without application/manual evidence |
 | Dependency-manager install | Actual published asset download/load | Manual local install is not this check |
 | Signing/notarization | Final signed artifact checks, Accepted notarization when enabled | Optional; normally `not_run`, unsigned stated clearly |
 
@@ -623,15 +635,15 @@ notarization `Accepted`, clean temporary keychains even on failure and test the
 final signed compiled package. Bare CLI executables cannot be stapled; a signed
 container/Apple `Contents/` layout requires deliberate packaging changes.
 
-### Seven Apple secrets: registration is not implementation
+### Six Apple secrets: production signing only
 
-The current `.github/workflows/release.yml` is **unsigned** and consumes **none**
-of these seven secrets. Merely registering them does **not** enable signing or
-notarization. Implementing a signing workflow is separate, explicitly approved
-scope; this playbook documents credential types, not an implemented integration.
-No secret below is required by the free local compiler or unsigned acceptance.
+The adopted CMYK `.github/workflows/release.yml` invokes `scripts/sign_release.py`
+with these six secrets on production events only. Every signature, notarization
+`Accepted`, DMG staple/Gatekeeper and final-payload check is fail-closed.
+Registration alone does not establish signing success. No secret below is
+required by the free local compiler, PR CI or unsigned local acceptance.
 
-For a future approved integration, register private values in the **destination**
+For this explicitly approved integration, register private values in the **destination**
 repository under **Settings → Secrets and variables → Actions → Secrets → New
 repository secret**. Template creation does not inherit repository secrets or
 variables. Never place certificates/private keys/passwords in source, workflow
@@ -645,7 +657,12 @@ YAML, logs, package metadata or a PR.
 | `NOTARYTOOL_APPLE_ID` | The Apple account **email address** authorized to notarize for the Developer team. |
 | `NOTARYTOOL_TEAM_ID` | The Apple Developer **Team ID** for the signing identity and notarization account. |
 | `NOTARYTOOL_PASSWORD` | An Apple **app-specific password** for notarization, **not the normal Apple account login password**. |
-| `CODESIGN_APPLE_ID` | Despite the misleading name, the full **Developer ID Application signing identity**, such as `Developer ID Application: Organization (TEAMID)`, or its certificate **SHA-1 identity fingerprint**. **Not an email address.** |
+
+No `CODESIGN_APPLE_ID` secret is used: derive exactly one valid Developer ID
+Application identity from the imported certificate and validate its certificate
+OU against `NOTARYTOOL_TEAM_ID`. Do not copy broad reusable-action entitlements or
+sign arbitrary JSON/resources. Keep pre-sign provenance separate from final
+signed-byte evidence; ZIP cannot be stapled, while the signed DMG must be.
 
 Keep public compiler pins/hosted opt-in under package metadata and Actions
 **Variables**, not Secrets. GitHub supplies the restricted publish job's

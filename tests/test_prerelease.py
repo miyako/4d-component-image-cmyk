@@ -23,8 +23,9 @@ class PrereleaseTests(unittest.TestCase):
         self.dist.mkdir()
         self.sha = "a" * 40
         self.digest = "b" * 64
-        self.config = {"repository": "CMYK", "version": "0.1.0-rc.1", "cli": "image-cmyk"}
+        self.config = {"repository": "CMYK", "version": "0.1.0-rc.2", "cli": "image-cmyk"}
         (self.dist / "CMYK.zip").write_bytes(b"synthetic archive bytes")
+        (self.dist / "CMYK.dmg").write_bytes(b"synthetic signed disk image")
         self.report = {
             "configuration": self.config, "commit": self.sha, "finished": True,
             "result": "partial", "release_ready": False,
@@ -36,7 +37,8 @@ class PrereleaseTests(unittest.TestCase):
         }
         for name, compiled in (("source_host", False), ("compiled_host", True)):
             self.report["steps"][name]["details"] = {
-                "success": True, "finished": True, "compiled": compiled}
+                "success": True, "finished": True, "compiled": compiled,
+                "execution_scope": "tool4d_harness", "normal_app_loading": "not_run"}
         self.report["steps"]["compile"]["details"] = {
             "success": True, "errors": [], "targets": ["x86_64_generic", "arm64_macOS_lib"],
             "input_sha256": "c" * 64, "output_sha256": "d" * 64}
@@ -44,6 +46,40 @@ class PrereleaseTests(unittest.TestCase):
                        "targets": {target: {"target": target, "commit": self.sha,
                                            "source_sha256": self.digest, "execution": "passed"}
                                    for target in publisher.TARGETS}}
+        certificate = "E" * 40
+        before = {
+            "CMYK.4DZ": {"sha256": "1" * 64, "bytes": 100, "mode": 0o644},
+            "Libraries/lib4d-arm64.dylib": {"sha256": "2" * 64, "bytes": 200, "mode": 0o755},
+            "Resources/bin/macOS/image-cmyk": {"sha256": "3" * 64, "bytes": 300, "mode": 0o755},
+        }
+        after = copy.deepcopy(before)
+        after["Libraries/lib4d-arm64.dylib"]["sha256"] = "4" * 64
+        after["Resources/bin/macOS/image-cmyk"]["sha256"] = "5" * 64
+        self.signing = {
+            "schema": 1, "commit": self.sha, "version": self.config["version"],
+            "finished": True, "result": "partial", "release_ready": False,
+            "certificate_sha1": certificate,
+            "presign": {"artifact": copy.deepcopy(self.report["artifact"])},
+            "artifacts": {
+                kind: {"path": "CMYK." + kind, "sha256": publisher.sha256(self.dist / ("CMYK." + kind)),
+                       "bytes": (self.dist / ("CMYK." + kind)).stat().st_size}
+                for kind in ("zip", "dmg")},
+            "payload": {"before": before, "after": after, "code_objects": [
+                {"path": path, "before_sha256": before[path]["sha256"], "sha256": after[path]["sha256"],
+                 "architectures": arches, "certificate_sha1": certificate, "team_match": True,
+                 "timestamp": True, "hardened_runtime": True}
+                for path, arches in (("Libraries/lib4d-arm64.dylib", ["arm64"]),
+                                     ("Resources/bin/macOS/image-cmyk", ["arm64", "x86_64"]))]},
+            "steps": {name: {"status": "passed"} for name in
+                      ("payload_signatures", "signed_compiled_harness", "dmg_signature",
+                       "notarization", "dmg_stapling", "dmg_assessment", "payload_assessment",
+                       "mounted_payload", "cli_smoke")},
+        }
+        self.signing["steps"]["notarization"]["details"] = {
+            "status": "Accepted", "id": "12345678-1234-1234-1234-123456789abc"}
+        self.signing["steps"]["signed_compiled_harness"]["details"] = copy.deepcopy(
+            self.report["steps"]["compiled_host"]["details"])
+        self.signing["steps"]["normal_4d_application"] = {"status": "not_run"}
         for name, value in (("load_config", self.config), ("commit", self.sha),
                             ("source_digest", self.digest), ("verify_tag", self.sha)):
             mock = patch.object(publisher, name, return_value=value)
@@ -54,9 +90,12 @@ class PrereleaseTests(unittest.TestCase):
     def save(self):
         (self.dist / "CMYK.acceptance.json").write_text(json.dumps(self.report))
         (self.dist / "CMYK.native-evidence.json").write_text(json.dumps(self.native))
+        self.signing["presign"]["acceptance_sha256"] = publisher.sha256(self.dist / "CMYK.acceptance.json")
+        self.signing["presign"]["native_evidence_sha256"] = publisher.sha256(self.dist / "CMYK.native-evidence.json")
+        (self.dist / "CMYK.signing.json").write_text(json.dumps(self.signing))
 
     def validate(self):
-        return publisher.publication_assets(self.root, "v0.1.0-rc.1", self.sha)
+        return publisher.publication_assets(self.root, "v0.1.0-rc.2", self.sha)
 
     def test_only_real_semver_prereleases_are_allowed(self):
         for tag in ("v0.1.0-rc.1", "v1.2.3-beta+build-id"):
@@ -66,14 +105,20 @@ class PrereleaseTests(unittest.TestCase):
                 publisher.require_prerelease(tag)
 
     def test_create_is_atomically_prerelease_never_latest(self):
-        with patch.object(publisher.subprocess, "run") as run:
-            publisher.publish(self.root, "v0.1.0-rc.1", self.sha)
-        args = run.call_args.args[0]
-        self.assertEqual(args[:4], ["gh", "release", "create", "v0.1.0-rc.1"])
-        for flag in ("--prerelease", "--latest=false", "--verify-tag"):
+        with patch.object(publisher.subprocess, "run") as run, \
+                patch.object(publisher, "verify_uploaded_assets") as verify_upload, \
+                patch.object(publisher, "release_metadata", side_effect=[
+                    {"draft": True, "prerelease": True}, {"draft": False, "prerelease": True}]):
+            publisher.publish(self.root, "v0.1.0-rc.2", self.sha)
+        args = run.call_args_list[0].args[0]
+        self.assertEqual(args[:4], ["gh", "release", "create", "v0.1.0-rc.2"])
+        for flag in ("--draft", "--prerelease", "--latest=false", "--verify-tag"):
             self.assertIn(flag, args)
         self.assertTrue(run.call_args.kwargs["check"])
-        self.assertEqual(len([arg for arg in args if arg.endswith(".json")]), 2)
+        self.assertEqual(len([arg for arg in args if arg.endswith(".json")]), 3)
+        verify_upload.assert_called_once()
+        self.assertEqual(run.call_args.args[0][:5],
+                         ["gh", "release", "edit", "v0.1.0-rc.2", "--draft=false"])
 
     def test_rejects_missing_failed_or_wrong_mode_host_gate(self):
         original = copy.deepcopy(self.report)
@@ -93,7 +138,7 @@ class PrereleaseTests(unittest.TestCase):
 
     def test_rejects_modified_archive_or_stale_commit(self):
         (self.dist / "CMYK.zip").write_bytes(b"tampered")
-        with self.assertRaisesRegex(ValueError, "accepted bytes"):
+        with self.assertRaisesRegex(ValueError, "verified bytes"):
             self.validate()
         (self.dist / "CMYK.zip").write_bytes(b"synthetic archive bytes")
         self.report["commit"] = "c" * 40
@@ -114,6 +159,70 @@ class PrereleaseTests(unittest.TestCase):
             self.save()
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.validate()
+
+    def test_requires_explicit_accepted_notary_and_every_distribution_gate(self):
+        original = copy.deepcopy(self.signing)
+        for change in ("notary-rejected", "no-staple", "no-cli-assessment", "no-harness", "no-dmg",
+                       "wrong-team", "no-runtime", "changed-project", "wrong-architecture",
+                       "normal-app-overclaim"):
+            self.signing = copy.deepcopy(original)
+            if change == "notary-rejected":
+                self.signing["steps"]["notarization"]["details"]["status"] = "Invalid"
+            elif change in ("no-staple", "no-cli-assessment", "no-harness"):
+                step = {"no-staple": "dmg_stapling", "no-cli-assessment": "payload_assessment",
+                        "no-harness": "signed_compiled_harness"}[change]
+                self.signing["steps"][step]["status"] = "not_run"
+            elif change == "no-dmg":
+                self.signing["artifacts"]["dmg"]["sha256"] = "0" * 64
+            elif change in ("wrong-team", "no-runtime"):
+                field = "team_match" if change == "wrong-team" else "hardened_runtime"
+                self.signing["payload"]["code_objects"][0][field] = False
+            elif change == "changed-project":
+                self.signing["payload"]["after"]["CMYK.4DZ"]["sha256"] = "0" * 64
+            elif change == "wrong-architecture":
+                self.signing["payload"]["code_objects"][1]["architectures"] = ["arm64"]
+            else:
+                self.signing["steps"]["normal_4d_application"]["status"] = "passed"
+            self.save()
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.validate()
+
+    def test_never_promotes_draft_if_uploaded_bytes_fail(self):
+        with patch.object(publisher.subprocess, "run") as run, \
+                patch.object(publisher, "verify_uploaded_assets", side_effect=ValueError("changed")):
+            with self.assertRaisesRegex(ValueError, "changed"):
+                publisher.publish(self.root, "v0.1.0-rc.2", self.sha)
+        self.assertEqual(run.call_count, 1)
+        self.assertIn("--draft", run.call_args.args[0])
+
+    def test_preflight_validates_final_assets_without_requiring_or_creating_tag(self):
+        with patch.object(publisher, "verify_tag") as verify, \
+                patch.object(publisher.subprocess, "run") as run:
+            assets = publisher.publication_assets(
+                self.root, "v0.1.0-rc.2", self.sha, tag_required=False)
+        self.assertEqual(len(assets), 5)
+        verify.assert_not_called()
+        run.assert_not_called()
+
+    def test_uploaded_bytes_are_downloaded_and_hashed_before_publication(self):
+        assets = [self.dist / "CMYK.zip", self.dist / "CMYK.signing.json"]
+
+        def download(args, **kwargs):
+            output = Path(args[args.index("--dir") + 1])
+            name = args[args.index("--pattern") + 1]
+            (output / name).write_bytes((self.dist / name).read_bytes())
+
+        with patch.object(publisher.subprocess, "run", side_effect=download) as run:
+            publisher.verify_uploaded_assets(self.root, "v0.1.0-rc.2", assets)
+        self.assertEqual(run.call_count, 2)
+
+        def corrupted(args, **kwargs):
+            output = Path(args[args.index("--dir") + 1])
+            (output / args[args.index("--pattern") + 1]).write_bytes(b"corrupted")
+
+        with patch.object(publisher.subprocess, "run", side_effect=corrupted):
+            with self.assertRaisesRegex(ValueError, "differs"):
+                publisher.verify_uploaded_assets(self.root, "v0.1.0-rc.2", assets)
 
     def test_writer_requires_native_execution(self):
         manifest = next(iter(self.native["targets"].values()))

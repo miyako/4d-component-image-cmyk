@@ -1,6 +1,6 @@
 {
   "name": "CMYK",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0-rc.2",
   "private": true,
   "description": "ICC-managed RGB/CMYK image conversion using Little CMS, JPEG, PNG and TIFF",
   "license": "MIT",

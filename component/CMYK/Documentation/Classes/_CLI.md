@@ -16,4 +16,6 @@ Windows ARM64 native execution is not implemented. See [Greeting](Greeting.md)
 for the common result/error shape.
 
 The read-only `compiled` Boolean evaluates `Is compiled mode` inside the
-component. The release host fixture uses it to reject an interpreted fallback.
+component. The tool4d harness fixture uses it to reject an interpreted fallback;
+this assertion does not establish external component installation/loading in
+the normal 4D application.

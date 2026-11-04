@@ -5,18 +5,22 @@ CMYK TIFF or JPEG. Its C++17 executable, `image-cmyk`, uses Little CMS for color
 transforms and libpng, libjpeg-turbo and libtiff for image I/O. It is not a native
 4D plug-in, an image uploader or a naive RGB-to-CMYK channel inversion.
 
-**Draft release candidate, not fully cross-platform accepted.** Native CLI tests
-pass on all three targets. Source and compiled-component host acceptance pass on
+**Draft release candidate, not fully cross-platform accepted.** Historical native CLI tests
+pass on all three targets. Source and compiled-mode harness assertions pass on
 hosted macOS 15 ARM64 with the unchanged pinned tool4d 20.7; an unsigned compiled
-ZIP is available as a CI artifact. Intel/Windows 4D and published installation
-remain unvalidated. Any published candidate is an unsigned experimental prerelease.
+ZIP is available as a CI artifact. **tool4d does not establish normal external
+component installation/loading in the actual 4D application.** That check,
+Intel/Windows 4D and published installation remain unvalidated.
+The current `0.1.0-rc.2` candidate targets the prospective signed macOS release
+flow below; no successful signed/notarized run is claimed yet. Prerelease
+acceptance remains partial with `release_ready:false`.
 See [current acceptance evidence](#release-candidate-evidence-2026-11-04).
 
 | Identity | Value |
 | --- | --- |
 | Repository / component / package | `miyako/CMYK` / `CMYK` |
 | Host namespace / class | `cs.CMYK.Converter` |
-| CLI / version / protocol | `image-cmyk` / `0.1.0-rc.1` / `1` |
+| CLI / version / protocol | `image-cmyk` / `0.1.0-rc.2` / `1` |
 | Implementation | C++17, CMake; statically built image/color dependencies |
 | Native targets | macOS x86_64, macOS arm64, Windows x64 |
 
@@ -134,7 +138,7 @@ image-cmyk convert --source PATH --destination PATH --destination-profile PATH
 
 Each result is exactly one UTF-8 JSON object plus LF. Success exits `0`, writes
 stdout and leaves stderr empty. Version returns
-`{"protocol":1,"version":"0.1.0-rc.1"}`. Inspection includes:
+`{"protocol":1,"version":"0.1.0-rc.2"}`. Inspection includes:
 
 ```json
 {
@@ -213,11 +217,11 @@ claim that the former example feature is still this component's API.
 
 ## Release-candidate evidence (2026-11-04)
 
-The predecessor package `4d-component-image-cmyk` first passed clean-host acceptance in
+The predecessor package `4d-component-image-cmyk` first passed tool4d harness assertions in
 [CI run 41776439377](https://github.com/miyako/CMYK/actions/runs/41776439377)
 at commit `d4d21e84e5d69f7b42a549c798363388365c8da7`, on hosted macOS 15 ARM64
 with tool4d **20.7 build 101905**. Those historical artifacts do not validate the
-renamed `CMYK` package. The latest accepted `CMYK` revision, artifact hash and run
+renamed `CMYK` package. The latest tool4d-tested `CMYK` revision, artifact hash and run
 are recorded in [the follow-up pull request](https://github.com/miyako/CMYK/pulls)
 and each new artifact's adjacent acceptance JSON. Before the first public release,
 the host namespace was also changed from `ImageCMYK` to `CMYK`: use
@@ -227,13 +231,24 @@ remain unchanged. Earlier artifacts do not validate the new namespace.
 The namespace is locally unique within this component;
 uniqueness among a host's future components cannot be proven here.
 
+The harness stages the component under the isolated host's
+`Components/CMYK.4dbase`. The host's Sources contains only the `Smoke` and
+`Host_error` methods plus settings/dependency metadata, with no copied feature
+classes; `Smoke` calls `cs.CMYK` classes directly. This is observed **tool4d
+harness execution and compiled-mode assertions**, not a normal 4D application
+external component installation/loading test. The historical `0.1.0-rc.1`
+tool4d report has this same limited scope: it is **not normal app validation**,
+regardless of older “host acceptance” labels. Published historical JSON/assets
+are not rewritten; interpret them with this limitation.
+
 | Check | Status | Observed evidence / limitation |
 | --- | --- | --- |
 | Native ARM64/Intel/Windows x64 CLI | `passed` | Three native CI jobs, 131 native assertions and 14 Python CLI integration tests per target; independent Little CMS reference pixel equality |
 | Codec runtime closure and resource assembly | `passed` | Static codecs; allowlisted system imports; Windows DLL/static-CRT audit; universal macOS plus Windows resources from same-revision manifests |
-| Source-host process and feature assertions | `passed` on hosted ARM64 | Clean process exit, actual `cs.CMYK.Converter` calls, 11 feature cases and full generic/negative contract |
+| Source tool4d harness process and feature assertions | `passed` on hosted ARM64 | Clean process exit, actual `cs.CMYK.Converter` calls, 11 feature cases and full generic/negative contract; not normal app loading |
 | 4D compilation acceptance | `passed` on hosted ARM64 | Fresh success/empty diagnostics, both targets, real CompiledCode/Libraries and input/output digest marker |
-| Source-stripped ZIP / unpacked compiled host | `passed` on hosted ARM64 | Exact final ZIP loaded; 11 cases and full contract pass with compiled mode true |
+| Source-stripped ZIP / unpacked tool4d compiled-mode harness | `passed` on hosted ARM64 | Exact final ZIP unpacked and staged; tool4d reports compiled mode true with 11 cases and full contract; not normal app loading |
+| Actual 4D application external component installation/loading | `not_run` | Requires separate testing in the normal 4D application; tool4d does not establish this |
 | Earlier local macOS 26.7 runtime | `failed` locally | Shutdown SIGSEGV even in a component-free project; not waived or relabeled as success |
 | Intel/Windows 4D, published dependency installation, signing | `not_run` | No native runtime, publication or signing claim |
 
@@ -248,25 +263,25 @@ The clean hosted environment passes with the same pinned 20.7 binary without
 accepting signal exits, weakening gates or changing the runtime baseline.
 
 Reproducible commands include the native build and test commands above and the
-real 4D commands below. Raw local reports/logs are under `build/`, including
+tool4d commands below. Raw local reports/logs are under `build/`, including
 `host-status.json`, `compile-status.json`, `source-host.log`, `compile.log`,
 and `shutdown-probe/result{,-return,-return21}.json`. A successful JSON report
 from a crashed process is **not** a passed acceptance check.
 
-The compiled candidate is unsigned and available for review/testing; CI artifacts
+The historical compiled candidate is unsigned and available for review/testing; CI artifacts
 are distinct from published experimental prereleases under GitHub Releases.
 Intel/Windows 4D acceptance and actual published installation
 remain separate checks. Any proposed compiler-baseline change requires a
 separate explicit decision.
 
-### Real source and compiled 4D acceptance
+### Source and compiled-mode tool4d harness checks
 
 For an isolated hosted attempt without changing repository variables, dispatch
 **Actions > CI > Run workflow**, select the implementation branch and enable
 `accept_4d`. From the CLI:
 
 ```sh
-gh workflow run ci.yml --ref use-cmyk-namespace -f accept_4d=true
+gh workflow run ci.yml --ref main -f accept_4d=true
 ```
 
 This rebuilds all three native targets at the selected commit, then runs the
@@ -277,7 +292,8 @@ ZIP plus adjacent evidence JSON only if packaging reaches those stages.
 No tag, publication, signing or persistent `FOURD_ENABLED` change is performed.
 A failed process remains a failed job; a single component-free shutdown probe
 is retained after acceptance failure. The helper's `release_ready:false` and
-untested Intel/Windows 4D/install/signing checks must not be relabeled as passed.
+untested normal 4D application/Intel/Windows 4D/install/signing checks must not
+be relabeled as passed.
 
 The pinned free tool4d in `package.json.tool` is **20.7 build 101905,
 macOS ARM64**. Unsigned local component compilation needs no license activation,
@@ -288,7 +304,7 @@ python3 scripts/ci_config.py download-tool4d --root .
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/compile_component.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/package_component.py --root . --repository miyako/CMYK \
-  --tag v0.1.0-rc.1 --unpack-test
+  --tag v0.1.0-rc.2 --unpack-test
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d \
   --component build/release-test/CMYK.4dbase
 ```
@@ -297,40 +313,73 @@ Before assembly, obtain **all three native executable artifacts and manifests
 from the same commit/input revision**, then use
 `python3 scripts/ci_config.py assemble --root .`. Do not mix stale binaries.
 Compilation must produce fresh successful evidence and genuine CompiledCode
-and native Libraries. Packaging strips class/method source; the last test must
-load the exact unpacked ZIP and report compiled mode, not the source folder.
+and native Libraries. Packaging strips class/method source; the last tool4d
+harness test must stage the exact unpacked ZIP and assert compiled mode,
+not use the source folder. These strict checks do not substitute for external
+component installation/loading in the normal 4D application.
 `scripts/accept_local.py` can orchestrate these stages when all artifacts are
 available. Read its help and [the acceptance playbook](AGENTS.md).
 
 **Validation status:** use the exact revision and bytes in the selected CI
 artifact's evidence, not this README alone. The helper correctly reports
 `result:"partial"`, `finished:true`, `release_ready:false` after successful
-ARM64 acceptance; separate native CI provides Intel/Windows CLI evidence, not
-Intel/Windows 4D evidence. The unsigned artifact/evidence pair is
+ARM64 tool4d harness checks; separate native CI provides Intel/Windows CLI
+evidence, not Intel/Windows 4D or normal application loading evidence.
+Legacy `source_host` / `compiled_host` report keys identify tool4d harness steps,
+now labeled `execution_scope:"tool4d_harness"` and
+`normal_app_loading:"not_run"`. The separate `real_4d_application` acceptance
+check remains `not_run` even when both harness steps pass.
+The unsigned artifact/evidence pair is
 `dist/CMYK.zip` and adjacent
 `dist/CMYK.acceptance.json`. Check `build/acceptance.json`,
 `build/source-host-status.json`, `build/compiled-host-status.json` and
 `build/compile-status.json` for the actual revision, hashes, tools and results.
 No signing, notarization, publication or download/install success is implied.
 
-## Installation after a validated release
+## Prospective signed macOS prerelease workflow
 
-The unsigned experimental publication workflow accepts **prerelease SemVer tags
-only**, initially `v0.1.0-rc.1`, matching both manifests and the bundled CLI.
-After the release setup is reviewed and merged, explicitly set the repository
-Actions variable `FOURD_ENABLED=true`, then create/push the approved matching tag.
-The workflow rebuilds all native targets and runs strict source, compiler and
-exact unpacked compiled-host acceptance before publishing. It creates the GitHub
-release atomically with `--prerelease --latest=false`; stable tags are rejected.
-No signing or notarization is implied. `CMYK.acceptance.json` and
-`CMYK.native-evidence.json` accompany `CMYK.zip` and retain untested platform
-checks and `release_ready:false`. Publication requires separate explicit approval;
-merging source changes alone is not permission to tag or publish.
+After the reviewed workflow is merged to `main`, manually dispatch **Actions >
+Release compiled component > Run workflow**, select `main`, set `preflight:true`
+and leave `version_tag` empty:
+
+```sh
+gh workflow run release.yml --ref main -f preflight=true
+```
+
+This preflight is intended to build, sign and notarize without creating a tag
+or publishing a release. It still requires the hosted 4D opt-in
+`FOURD_ENABLED=true`. The six required signing/notarization secrets are already
+registered; registration is **not** evidence that Apple accepted a submission
+or that any signed run passed.
+
+The production flow will sign the macOS universal CLI and compiled native
+library, then produce a signed, notarized and stapled DMG separately from
+`CMYK.zip`. The ZIP will contain the identical component payload, but **a ZIP
+cannot be stapled**; the stapled ticket belongs to the DMG. Windows binaries
+remain unsigned. Acceptance and native build manifests describe **presign**
+bytes; final distribution and signed-payload hashes belong to
+`CMYK.signing.json`. Do not treat presign hashes as hashes of final signed
+assets. The final signed package must undergo another strict tool4d harness
+run; that rerun still does **not** validate normal external component
+installation/loading in the actual 4D application.
+
+No successful signed/notarized preflight is claimed here yet. The candidate
+remains an experimental prerelease with partial acceptance and
+`release_ready:false`, even if signing subsequently passes. Publication is a
+separate explicitly approved operation using an existing matching prerelease
+tag, currently `v0.1.0-rc.2`; stable tags are rejected. Preflight creates no tag,
+and merging source changes alone is not permission to tag or publish.
+`CMYK.acceptance.json`, `CMYK.native-evidence.json` and `CMYK.signing.json`
+distinguish the presign observations from final signed-byte evidence.
+
+## Installation instructions (normal application validation still required)
 
 In the host Dependency manager, add GitHub repository
 `miyako/CMYK` and a published matching version tag.
 The release asset must be `CMYK.zip`. Dependency-manager
 GitHub support requires a compatible 4D release (20 R6 or later/current LTS).
-Alternatively, manually copy the unpacked
+For a separate normal 4D application installation/loading test, manually copy
+the unpacked
 `CMYK.4dbase` into the host's `Components/` folder and reload.
+These are installation instructions, not observed installation/loading evidence.
 Manual local loading is not evidence of published dependency-manager install.
