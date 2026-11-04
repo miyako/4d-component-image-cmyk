@@ -256,6 +256,27 @@ class PrereleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "differs"):
                 publisher.verify_uploaded_assets(self.root, "v0.1.0-rc.2", assets)
 
+    def test_release_metadata_finds_draft_across_pages_not_published_only_tag_endpoint(self):
+        pages = [[{"tag_name": "v0.1.0-rc.1", "draft": False}],
+                 [{"tag_name": "v0.1.0-rc.2", "draft": True, "prerelease": True}]]
+        result = publisher.subprocess.CompletedProcess([], 0, stdout=json.dumps(pages))
+        with patch.object(publisher.subprocess, "run", return_value=result) as run:
+            metadata = publisher.release_metadata(self.root, "v0.1.0-rc.2")
+        self.assertTrue(metadata["draft"])
+        self.assertIn("--paginate", run.call_args.args[0])
+        self.assertIn("--slurp", run.call_args.args[0])
+        self.assertNotIn("/tags/", " ".join(run.call_args.args[0]))
+        for invalid in ([], [[pages[1][0], pages[1][0]]]):
+            result.stdout = json.dumps(invalid)
+            with patch.object(publisher.subprocess, "run", return_value=result):
+                with self.assertRaises(ValueError):
+                    publisher.release_metadata(self.root, "v0.1.0-rc.2")
+
+    def test_relative_root_produces_absolute_upload_paths(self):
+        assets = publisher.publication_assets(
+            self.root.relative_to(ROOT), "v0.1.0-rc.2", self.sha)
+        self.assertTrue(all(path.is_absolute() for path in assets))
+
     def test_writer_requires_native_execution(self):
         manifest = next(iter(self.native["targets"].values()))
         with patch.object(publisher, "verify", return_value={**manifest, "execution": "not_run"}):

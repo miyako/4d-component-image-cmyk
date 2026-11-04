@@ -84,7 +84,7 @@ def write_native_evidence(root):
 
 
 def validate_evidence(root, expected_sha):
-    root = Path(root)
+    root = Path(root).resolve()
     config = load_config(root, initialized=True)
     if commit(root) != expected_sha:
         raise ValueError("publication checkout must match the resolved tag")
@@ -145,7 +145,7 @@ def presign_assets(root, expected_sha):
 
 def publication_assets(root, tag, expected_sha, *, tag_required=True):
     require_prerelease(tag)
-    root = Path(root)
+    root = Path(root).resolve()
     config = load_config(root, initialized=True, tag=tag)
     if tag_required:
         verify_tag(root, tag, expected_sha)
@@ -257,9 +257,15 @@ def verify_uploaded_assets(root, tag, assets):
 
 
 def release_metadata(root, tag):
-    result = subprocess.run(["gh", "api", "repos/{owner}/{repo}/releases/tags/" + tag],
+    # The by-tag endpoint excludes drafts, even when the caller can list them.
+    result = subprocess.run(["gh", "api", "repos/{owner}/{repo}/releases?per_page=100",
+                             "--paginate", "--slurp"],
                             cwd=root, check=True, capture_output=True, text=True)
-    return json.loads(result.stdout)
+    matching = [release for page in json.loads(result.stdout) for release in page
+                if release.get("tag_name") == tag]
+    if len(matching) != 1:
+        raise ValueError("exactly one owned draft or published release must match the tag")
+    return matching[0]
 
 
 def publish(root, tag, expected_sha):
