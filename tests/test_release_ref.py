@@ -228,6 +228,11 @@ class ReleaseRefTests(unittest.TestCase):
         self.assertIn("TOOL4D_URL: ''", release)
         self.assertIn("TOOL4D_SHA256: ''", release)
 
+    def test_signing_checkout_retains_tag_refs_for_exact_push_verification(self):
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        compilation = release.split("\n  compile:\n", 1)[1].split("\n  publish:\n", 1)[0]
+        self.assertIn("ref: ${{ needs.gate.outputs.source_sha }}\n          fetch-depth: 0", compilation)
+
 
 if __name__ == "__main__":
     unittest.main()
