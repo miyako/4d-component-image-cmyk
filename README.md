@@ -11,16 +11,17 @@ hosted macOS 15 ARM64 with the unchanged pinned tool4d 20.7; an unsigned compile
 ZIP is available as a CI artifact. **tool4d does not establish normal external
 component installation/loading in the actual 4D application.** That check,
 Intel/Windows 4D and published installation remain unvalidated.
-The current `0.1.0-rc.2` candidate targets the prospective signed macOS release
-flow below; no successful signed/notarized run is claimed yet. Prerelease
-acceptance remains partial with `release_ready:false`.
+The current `0.1.0` version is published as the Latest signed macOS release
+(`v0.1.0`, preceded by `v0.1.0-rc.1` and `v0.1.0-rc.2`); see the signed release
+flow below. Local/CI acceptance evidence remains partial with
+`release_ready:false`.
 See [current acceptance evidence](#release-candidate-evidence-2026-11-04).
 
 | Identity | Value |
 | --- | --- |
 | Repository / component / package | `miyako/CMYK` / `CMYK` |
 | Host namespace / class | `cs.CMYK.Converter` |
-| CLI / version / protocol | `image-cmyk` / `0.1.0-rc.2` / `1` |
+| CLI / version / protocol | `image-cmyk` / `0.1.0` / `1` |
 | Implementation | C++17, CMake; statically built image/color dependencies |
 | Native targets | macOS x86_64, macOS arm64, Windows x64 |
 
@@ -138,7 +139,7 @@ image-cmyk convert --source PATH --destination PATH --destination-profile PATH
 
 Each result is exactly one UTF-8 JSON object plus LF. Success exits `0`, writes
 stdout and leaves stderr empty. Version returns
-`{"protocol":1,"version":"0.1.0-rc.2"}`. Inspection includes:
+`{"protocol":1,"version":"0.1.0"}`. Inspection includes:
 
 ```json
 {
@@ -309,7 +310,7 @@ python3 scripts/ci_config.py download-tool4d --root .
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/compile_component.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/package_component.py --root . --repository miyako/CMYK \
-  --tag v0.1.0-rc.2 --unpack-test
+  --tag v0.1.0 --unpack-test
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d \
   --component build/release-test/CMYK.4dbase
 ```
@@ -350,19 +351,19 @@ three native CLI targets and pinned 20.7 tool4d/compiler/package gates, then
 downloads and verifies that exact compiled ZIP in a separate job. It uses no
 signing secrets and changes no remote branch, tag or release.
 
-| Choice | Rule | From `0.1.0-rc.2` |
+| Choice | Rule | From `0.1.0` |
 | --- | --- | --- |
 | `major` | Increment major, reset minor/patch | `1.0.0` |
 | `minor` | Increment minor, reset patch | `0.2.0` |
 | `patch` | Increment the numeric patch | `0.1.1` |
-| `promote` | Remove prerelease/build metadata without changing the core | `0.1.0` |
+| `promote` | Remove prerelease/build metadata without changing the core | rejected (already stable) |
 
 These choices produce stable versions and discard build metadata; `promote`
 rejects an already stable version. They do not increment an RC counter.
 `package.json.version` is authoritative, while `template.json`, native CLI
 version, host version assertions and the current class-documentation example
 must remain synchronized. Historical release facts are not rewritten.
-For a read-only local plan, run `python3 scripts/bump_release.py plan --bump promote`.
+For a read-only local plan, run `python3 scripts/bump_release.py plan --bump patch`.
 
 Unchecking **Dry run** explicitly requests production signing and publication.
 Production dispatch is restricted to `main`. The workflow resolves one base
@@ -382,7 +383,7 @@ only the identical source, channel and asset hashes.
 
 New SemVer prereleases publish as `prerelease:true`, never Latest. Stable tags
 publish as `prerelease:false` and explicitly Latest; a hyphen in build metadata
-alone is not a prerelease. This feature does not alter the existing rc2 tag,
+alone is not a prerelease. This feature does not alter the existing `v0.1.0` and rc tags,
 assets or externally edited release flags. Workflow validation/merge is not
 permission to execute a production bump.
 
@@ -439,7 +440,7 @@ harness does not establish full normal-application/cross-platform acceptance.
 The existing-tag release entrypoint accepts an already existing matching
 SemVer tag; the bump entrypoint above prepares a new version/tag only after
 its gates. Preflight creates no tag, and merging source changes alone is not
-permission to tag or publish. Signed `v0.1.0-rc.2` and unsigned rc1 remain intact.
+permission to tag or publish. Published `v0.1.0`, signed rc2 and unsigned rc1 remain intact.
 `CMYK.acceptance.json`, `CMYK.native-evidence.json` and `CMYK.signing.json`
 distinguish the presign observations from final signed-byte evidence.
 
