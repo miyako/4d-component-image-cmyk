@@ -410,7 +410,7 @@ Run the actual stages (example version `0.1.0`, initialized destination only):
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/compile_component.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/package_component.py --root . --repository OWNER/REPOSITORY \
-  --tag v0.1.0 --unpack-test
+  --tag 0.1.0 --unpack-test
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d \
   --component build/release-test/REPOSITORY.4dbase
 ```
@@ -474,7 +474,7 @@ failed status/phase reports. This is a starter identity/wiring regression,
 For approved hosted publication only, set Actions **variable**
 `FOURD_ENABLED=true`; `TOOL4D_URL` / `TOOL4D_SHA256` are optional paired overrides
 of the approved public `package.json.tool` pin, not required secrets. Push the matching
-`v<version>` tag. Release jobs build same-tag native resources, compile after
+bare `<version>` tag (e.g. `0.1.2`, no `v` prefix). Release jobs build same-tag native resources, compile after
 assembly and host-test the unpacked package before publishing `<repository>.zip`.
 Only publication receives built-in `GITHUB_TOKEN` write permission; no personal
 token/version-bot commit is required.
@@ -492,7 +492,8 @@ Run this before pushing a new release tag. The six signing credentials below are
 available only to production release signing, never PR CI.
 
 Ordinary publication requires `version_tag`, an **already existing**
-`v<SemVer>` tag matching the initialized
+bare `<SemVer>` tag (e.g. `0.1.2`; legacy `v0.1.1`-and-earlier tags remain
+resolvable) matching the initialized
 repository's `template.json.version` / `package.json.version`. It creates no
 tag. The gate resolves/peels that tag to a commit SHA, validates source at that
 SHA, and all reusable native CI, assembly, compilation and publication jobs use

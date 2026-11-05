@@ -7,12 +7,13 @@ import re
 import subprocess
 import sys
 
-from ci_config import ROOT, SEMVER, load_config
+from ci_config import ROOT, SEMVER, load_config, release_tag
 
 
 def validate_tag(tag):
-    if not isinstance(tag, str) or not re.fullmatch("v" + SEMVER, tag, flags=re.ASCII):
-        raise ValueError("release tag must be v<SemVer>, not a branch or arbitrary ref")
+    # Bare SemVer; legacy "v"-prefixed tags (v0.1.1 and earlier) remain resolvable.
+    if not isinstance(tag, str) or not re.fullmatch("v?" + SEMVER, tag, flags=re.ASCII):
+        raise ValueError("release tag must be <SemVer>, not a branch or arbitrary ref")
     return tag
 
 
@@ -53,7 +54,7 @@ def resolve(root, *, event, ref_type="", ref_name="", version_tag="", event_sha=
             cwd=root, check=True, capture_output=True, text=True).stdout.strip()
         if head != event_sha or remote != event_sha + "\trefs/heads/main":
             raise ValueError("preflight checkout/event must match current origin/main")
-        tag = validate_tag("v" + load_config(root, initialized=True)["version"])
+        tag = validate_tag(release_tag(load_config(root, initialized=True)["version"]))
         if version_tag not in ("", tag):
             raise ValueError("preflight requires the configured matching version")
         return {"tag": tag, "sha": event_sha}
