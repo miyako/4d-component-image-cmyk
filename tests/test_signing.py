@@ -61,7 +61,7 @@ class Fixture(unittest.TestCase):
         return archive
 
 
-TEST_TAG = "v0.1.0-rc.2"
+TEST_TAG = "0.1.0-rc.2"
 
 
 class PolicyTests(Fixture):
@@ -116,8 +116,8 @@ class PolicyTests(Fixture):
 
     def test_signing_accepts_synchronized_stable_versions_not_a_hardcoded_rc(self):
         env = self.env()
-        env["GITHUB_REF"] = "refs/tags/v1.2.3"
-        self.preflight(env, tag="v1.2.3")
+        env["GITHUB_REF"] = "refs/tags/1.2.3"
+        self.preflight(env, tag="1.2.3")
 
     def test_untagged_candidate_requires_production_validation_and_matching_tag(self):
         env = self.env("workflow_dispatch")
@@ -126,14 +126,14 @@ class PolicyTests(Fixture):
         with patch("bump_release.validate_candidate", return_value={"tag": TEST_TAG}) as validate:
             self.preflight(env, candidate=directory)
             validate.assert_called_once_with(self.root, directory, SHA, production=True)
-        with patch("bump_release.validate_candidate", return_value={"tag": "v9.0.0"}):
+        with patch("bump_release.validate_candidate", return_value={"tag": "9.0.0"}):
             with self.assertRaises(signing.SigningError):
                 self.preflight(env, candidate=directory)
         with self.assertRaises(signing.SigningError):
             self.preflight(self.env(), candidate=directory)
 
     def test_head_tag_platform_and_version(self):
-        for args in ({"sha": "c" * 40}, {"sha": "bad"}, {"tag": "v0.1.0-rc.1"}, {"system": "Windows"}):
+        for args in ({"sha": "c" * 40}, {"sha": "bad"}, {"tag": "0.1.0-rc.1"}, {"system": "Windows"}):
             with self.subTest(args=args), self.assertRaises(signing.SigningError):
                 self.preflight(self.env(), **args)
         wrong = self.env()

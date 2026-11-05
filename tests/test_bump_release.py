@@ -21,15 +21,18 @@ class SemVerTests(unittest.TestCase):
                          {"major": 12, "minor": 34, "patch": 56, "prerelease": "rc.2", "build": "build-04"})
         self.assertEqual(bump.parse_version("0.0.0"),
                          {"major": 0, "minor": 0, "patch": 0, "prerelease": "", "build": ""})
-        for tag in ("v1.2.3", "v1.2.3+build-hyphen", "v1.2.3+001"):
+        for tag in ("1.2.3", "1.2.3+build-hyphen", "1.2.3+001"):
             self.assertEqual(bump.release_channel(tag), {"prerelease": False, "latest": True})
-        self.assertEqual(bump.release_channel("v1.2.3-rc.2+build-hyphen"), {"prerelease": True, "latest": False})
+        self.assertEqual(bump.release_channel("1.2.3-rc.2+build-hyphen"), {"prerelease": True, "latest": False})
         for version in (None, 1, "", "1.2", "01.2.3", "1.02.3", "1.2.03", "1.2.3-01", "1.2.3-a.00",
                         "1.2.3-", "1.2.3+", "1.2.3-a..b", "1.2.3+a..b", "1.2.3\n", "١.2.3",
                         "v1.2.3", "1.2.3-α", "1.2.3+meta_underscore"):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 bump.parse_version(version)
-        for tag in ("main", "refs/tags/v1.2.3", "v1.2.3-01", "v1.2.3\n"):
+        # Legacy v-prefixed tags (v0.1.1 and earlier) are still classified.
+        self.assertEqual(bump.release_channel("v0.1.1"), {"prerelease": False, "latest": True})
+        self.assertEqual(bump.release_channel("v0.1.0-rc.2"), {"prerelease": True, "latest": False})
+        for tag in ("main", "refs/tags/1.2.3", "1.2.3-01", "1.2.3\n", "vv1.2.3", "V1.2.3"):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 bump.release_channel(tag)
 
@@ -188,7 +191,7 @@ class CandidateTests(GitFixture):
             result = self.prepare()
         values = dict(line.split("=", 1) for line in output.read_text().splitlines())
         self.assertEqual(values, {"sha": result["source_sha"], "base_sha": self.base,
-                                  "tag": "v0.1.1", "version": "0.1.1", "prerelease": "false"})
+                                  "tag": "0.1.1", "version": "0.1.1", "prerelease": "false"})
 
     def test_dirty_and_wrong_head_rejected_without_reset_or_push(self):
         self.file("README.md", "dirty user edits\n")
@@ -340,13 +343,28 @@ class ProductionTests(GitFixture):
         self.assertEqual(self.git("rev-parse", "HEAD"), self.base)
 
     def test_production_prepare_refuses_existing_remote_target_tag(self):
-        self.git("tag", "v0.1.1", self.base)
-        self.git("push", "-q", "origin", "refs/tags/v0.1.1")
+        self.git("tag", "0.1.1", self.base)
+        self.git("push", "-q", "origin", "refs/tags/0.1.1")
         with patch.dict(os.environ, self.env()):
             with self.assertRaisesRegex(ValueError, "target tag"):
                 self.prepare(production=True)
         self.assertFalse(self.directory.exists())
         self.assertEqual(self.git("rev-parse", "HEAD"), self.base)
+
+    def test_production_prepare_refuses_existing_legacy_v_target_tag(self):
+        self.git("tag", "v0.1.1", self.base)
+        self.git("push", "-q", "origin", "refs/tags/v0.1.1")
+        with patch.dict(os.environ, self.env()):
+            with self.assertRaisesRegex(ValueError, "legacy v-prefixed"):
+                self.prepare(production=True)
+        self.assertFalse(self.directory.exists())
+        self.assertEqual(self.git("rev-parse", "HEAD"), self.base)
+
+    def test_planned_tags_are_bare_semver(self):
+        for version, bump_kind, tag in (("0.1.1", "patch", "0.1.2"), ("0.1.1", "minor", "0.2.0"),
+                                        ("0.1.1", "major", "1.0.0"), ("0.2.0-rc.1", "promote", "0.2.0")):
+            with self.subTest(version=version, bump=bump_kind):
+                self.assertEqual(bump.planned(version, bump_kind)["tag"], tag)
 
     def test_production_event_ref_workflow_and_base_guards(self):
         result = self.ready()
@@ -367,7 +385,7 @@ class ProductionTests(GitFixture):
 
         def accepted(root, tag, sha, **kwargs):
             self.assertEqual(self.remote_refs(), self.base + " refs/heads/main")
-            self.assertEqual((tag, sha, kwargs), ("v0.1.1", result["source_sha"], {"tag_required": False}))
+            self.assertEqual((tag, sha, kwargs), ("0.1.1", result["source_sha"], {"tag_required": False}))
             calls.append("validated")
 
         with patch.dict(os.environ, self.env()), patch("publish_prerelease.publication_assets", side_effect=accepted):

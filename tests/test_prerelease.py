@@ -104,14 +104,14 @@ class PrereleaseTests(unittest.TestCase):
         (self.dist / "CMYK.signing.json").write_text(json.dumps(self.signing))
 
     def validate(self):
-        return publisher.publication_assets(self.root, "v0.1.0-rc.2", self.sha)
+        return publisher.publication_assets(self.root, "0.1.0-rc.2", self.sha)
 
     def test_channel_distinguishes_prerelease_from_build_metadata(self):
-        for tag in ("v0.1.0-rc.1", "v1.2.3-beta+build-id"):
+        for tag in ("0.1.0-rc.1", "1.2.3-beta+build-id"):
             self.assertEqual(publisher.release_channel(tag), {"prerelease": True, "latest": False})
-        for tag in ("v0.1.0", "v1.2.3+build-with-hyphen"):
+        for tag in ("0.1.0", "1.2.3+build-with-hyphen"):
             self.assertEqual(publisher.release_channel(tag), {"prerelease": False, "latest": True})
-        for tag in ("main", "v01.0.0-rc.1", "v1.0.0-01"):
+        for tag in ("main", "01.0.0-rc.1", "1.0.0-01"):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 publisher.release_channel(tag)
 
@@ -121,9 +121,9 @@ class PrereleaseTests(unittest.TestCase):
                 patch.object(publisher, "release_metadata", side_effect=[
                     None, {"id": 123, "draft": True, "prerelease": True},
                     {"draft": False, "prerelease": True}]):
-            publisher.publish(self.root, "v0.1.0-rc.2", self.sha)
+            publisher.publish(self.root, "0.1.0-rc.2", self.sha)
         args = run.call_args_list[0].args[0]
-        self.assertEqual(args[:4], ["gh", "release", "create", "v0.1.0-rc.2"])
+        self.assertEqual(args[:4], ["gh", "release", "create", "0.1.0-rc.2"])
         for flag in ("--draft", "--prerelease", "--latest=false", "--verify-tag"):
             self.assertIn(flag, args)
         self.assertTrue(run.call_args.kwargs["check"])
@@ -134,7 +134,7 @@ class PrereleaseTests(unittest.TestCase):
         self.assertIn("make_latest=false", run.call_args.args[0])
 
     def test_stable_release_is_created_stable_and_explicitly_latest_after_verification(self):
-        response = subprocess.CompletedProcess([], 0, stdout='{"tag_name":"v0.1.0"}')
+        response = subprocess.CompletedProcess([], 0, stdout='{"tag_name":"0.1.0"}')
         with patch.object(publisher, "publication_assets", return_value=[]), \
                 patch.object(publisher, "verify_uploaded_assets") as verify_upload, \
                 patch.object(publisher, "verify_tag"), \
@@ -142,7 +142,7 @@ class PrereleaseTests(unittest.TestCase):
                 patch.object(publisher, "release_metadata", side_effect=[
                     None, {"id": 124, "draft": True, "prerelease": False},
                     {"draft": False, "prerelease": False}]):
-            publisher.publish(self.root, "v0.1.0", self.sha)
+            publisher.publish(self.root, "0.1.0", self.sha)
         self.assertIn("--prerelease=false", run.call_args_list[0].args[0])
         self.assertIn("make_latest=true", run.call_args_list[-2].args[0])
         self.assertIn("prerelease=false", run.call_args_list[-2].args[0])
@@ -153,7 +153,7 @@ class PrereleaseTests(unittest.TestCase):
                 "draft": True, "prerelease": True, "body": "unrelated existing draft"}), \
                 patch.object(publisher.subprocess, "run") as run:
             with self.assertRaisesRegex(ValueError, "exact source"):
-                publisher.publish(self.root, "v0.1.0-rc.2", self.sha)
+                publisher.publish(self.root, "0.1.0-rc.2", self.sha)
         run.assert_not_called()
 
     def test_matching_published_retry_verifies_bytes_and_remote_tag_without_mutation(self):
@@ -164,7 +164,7 @@ class PrereleaseTests(unittest.TestCase):
         with patch.object(publisher, "release_metadata", return_value=existing), \
                 patch.object(publisher, "verify_uploaded_assets") as download, \
                 patch.object(publisher.subprocess, "run") as run:
-            publisher.publish(self.root, "v0.1.0-rc.2", self.sha)
+            publisher.publish(self.root, "0.1.0-rc.2", self.sha)
         download.assert_called_once()
         self.assertEqual(run.call_count, 1)
         self.assertEqual(run.call_args.args[0][:2], ["git", "fetch"])
@@ -179,9 +179,9 @@ class PrereleaseTests(unittest.TestCase):
                 draft, draft, {"draft": False, "prerelease": True}]), \
                 patch.object(publisher, "verify_uploaded_assets") as download, \
                 patch.object(publisher.subprocess, "run") as run:
-            publisher.publish(self.root, "v0.1.0-rc.2", self.sha)
+            publisher.publish(self.root, "0.1.0-rc.2", self.sha)
         self.assertEqual(run.call_args_list[0].args[0],
-                         ["gh", "release", "upload", "v0.1.0-rc.2", str(assets[-1])])
+                         ["gh", "release", "upload", "0.1.0-rc.2", str(assets[-1])])
         self.assertEqual(download.call_args_list[0].args[2], assets[:-1])
         self.assertEqual(download.call_count, 3)
         self.assertFalse(any("--clobber" in call.args[0] for call in run.call_args_list))
@@ -258,7 +258,7 @@ class PrereleaseTests(unittest.TestCase):
                 patch.object(publisher, "release_metadata", return_value=None), \
                 patch.object(publisher, "verify_uploaded_assets", side_effect=ValueError("changed")):
             with self.assertRaisesRegex(ValueError, "changed"):
-                publisher.publish(self.root, "v0.1.0-rc.2", self.sha)
+                publisher.publish(self.root, "0.1.0-rc.2", self.sha)
         self.assertEqual(run.call_count, 1)
         self.assertIn("--draft", run.call_args.args[0])
 
@@ -266,7 +266,7 @@ class PrereleaseTests(unittest.TestCase):
         with patch.object(publisher, "verify_tag") as verify, \
                 patch.object(publisher.subprocess, "run") as run:
             assets = publisher.publication_assets(
-                self.root, "v0.1.0-rc.2", self.sha, tag_required=False)
+                self.root, "0.1.0-rc.2", self.sha, tag_required=False)
         self.assertEqual(len(assets), 5)
         verify.assert_not_called()
         run.assert_not_called()
@@ -304,7 +304,7 @@ class PrereleaseTests(unittest.TestCase):
             (output / name).write_bytes((self.dist / name).read_bytes())
 
         with patch.object(publisher.subprocess, "run", side_effect=download) as run:
-            publisher.verify_uploaded_assets(self.root, "v0.1.0-rc.2", assets)
+            publisher.verify_uploaded_assets(self.root, "0.1.0-rc.2", assets)
         self.assertEqual(run.call_count, 2)
 
         def corrupted(args, **kwargs):
@@ -313,14 +313,14 @@ class PrereleaseTests(unittest.TestCase):
 
         with patch.object(publisher.subprocess, "run", side_effect=corrupted):
             with self.assertRaisesRegex(ValueError, "differs"):
-                publisher.verify_uploaded_assets(self.root, "v0.1.0-rc.2", assets)
+                publisher.verify_uploaded_assets(self.root, "0.1.0-rc.2", assets)
 
     def test_release_metadata_finds_draft_across_pages_not_published_only_tag_endpoint(self):
-        pages = [[{"tag_name": "v0.1.0-rc.1", "draft": False}],
-                 [{"tag_name": "v0.1.0-rc.2", "draft": True, "prerelease": True}]]
+        pages = [[{"tag_name": "0.1.0-rc.1", "draft": False}],
+                 [{"tag_name": "0.1.0-rc.2", "draft": True, "prerelease": True}]]
         result = publisher.subprocess.CompletedProcess([], 0, stdout=json.dumps(pages))
         with patch.object(publisher.subprocess, "run", return_value=result) as run:
-            metadata = publisher.release_metadata(self.root, "v0.1.0-rc.2")
+            metadata = publisher.release_metadata(self.root, "0.1.0-rc.2")
         self.assertTrue(metadata["draft"])
         self.assertIn("--paginate", run.call_args.args[0])
         self.assertIn("--slurp", run.call_args.args[0])
@@ -329,11 +329,11 @@ class PrereleaseTests(unittest.TestCase):
             result.stdout = json.dumps(invalid)
             with patch.object(publisher.subprocess, "run", return_value=result):
                 with self.assertRaises(ValueError):
-                    publisher.release_metadata(self.root, "v0.1.0-rc.2")
+                    publisher.release_metadata(self.root, "0.1.0-rc.2")
 
     def test_relative_root_produces_absolute_upload_paths(self):
         assets = publisher.publication_assets(
-            self.root.relative_to(ROOT), "v0.1.0-rc.2", self.sha)
+            self.root.relative_to(ROOT), "0.1.0-rc.2", self.sha)
         self.assertTrue(all(path.is_absolute() for path in assets))
 
     def test_writer_requires_native_execution(self):

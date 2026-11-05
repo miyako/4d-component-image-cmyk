@@ -14,7 +14,7 @@ import re
 import subprocess
 import sys
 
-from ci_config import ROOT, load_config
+from ci_config import ROOT, load_config, release_tag, tag_version
 
 
 REPOSITORY = "miyako/CMYK"
@@ -49,8 +49,8 @@ def parse_version(version):
 
 
 def release_channel(tag):
-    require(isinstance(tag, str) and tag.startswith("v"), "release tag must be v<SemVer>")
-    prerelease = bool(parse_version(tag[1:])["prerelease"])
+    require(isinstance(tag, str), "release tag must be <SemVer>")
+    prerelease = bool(parse_version(tag_version(tag))["prerelease"])
     return {"prerelease": prerelease, "latest": not prerelease}
 
 
@@ -152,7 +152,7 @@ def planned(version, bump):
         require(parsed["prerelease"], "promote requires a prerelease; version is already stable")
     target = f"{major}.{minor}.{patch}"
     return {"schema": 1, "repository": REPOSITORY, "previous_version": version, "version": target,
-            "tag": "v" + target, "bump": bump, **release_channel("v" + target)}
+            "tag": release_tag(target), "bump": bump, **release_channel(release_tag(target))}
 
 
 def plan(root, bump):
@@ -278,14 +278,18 @@ def base_files(root, revision):
 
 def remote_state(root, tag):
     main_ref, tag_ref = "refs/heads/main", "refs/tags/" + tag
+    # A legacy "v"-prefixed tag for the same version also counts as already released.
+    legacy_ref = "refs/tags/v" + tag_version(tag)
     result = {}
-    for line in output(root, "ls-remote", "--refs", "origin", main_ref, tag_ref,
+    for line in output(root, "ls-remote", "--refs", "origin", main_ref, tag_ref, legacy_ref,
                        label="refresh main/tag").splitlines():
         sha, ref = line.split("\t")
         full_sha(sha)
-        require(ref in (main_ref, tag_ref) and ref not in result, "ambiguous remote release refs")
+        require(ref in (main_ref, tag_ref, legacy_ref) and ref not in result, "ambiguous remote release refs")
         result[ref] = sha
     require(main_ref in result, "origin/main is missing")
+    require(legacy_ref == tag_ref or legacy_ref not in result,
+            "target version already has a legacy v-prefixed release tag")
     return result[main_ref], result.get(tag_ref)
 
 

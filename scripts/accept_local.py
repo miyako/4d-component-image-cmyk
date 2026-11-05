@@ -10,7 +10,7 @@ import sys
 
 from build_cli import build, native_target, smoke_test
 from build_provenance import commit, sha256
-from ci_config import ROOT, TARGETS, assemble, load_config, require_tool4d_host
+from ci_config import ROOT, TARGETS, assemble, load_config, release_tag, require_tool4d_host
 from compile_component import compile_component
 from doctor import doctor
 from package_component import package, unpack_for_test, validate_resources
@@ -98,7 +98,7 @@ def accept(root, repository, tool4d, cross=False):
         source = step("source_host", lambda: test_4d(root, tool4d))
         (output.parent / "source-host-status.json").write_text(json.dumps(source, indent=2) + "\n")
         step("compile", lambda: compile_component(root, tool4d))
-        archive = step("package", lambda: package(root, repository=repository, tag="v" + config["version"]))
+        archive = step("package", lambda: package(root, repository=repository, tag=release_tag(config["version"])))
         report["artifact"] = {"path": str(archive), "sha256": sha256(archive), "bytes": archive.stat().st_size}
         unpacked = unpack_for_test(root, archive)
         compiled = step("compiled_host", lambda: test_4d(root, tool4d, unpacked))

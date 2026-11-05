@@ -24,6 +24,18 @@ TARGETS = ("macos-x64", "macos-arm64", "windows-x64")
 SEMVER = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 
 
+def release_tag(version):
+    """New release tags are bare SemVer; a "v" prefix is never generated."""
+    return version
+
+
+def tag_version(tag):
+    """Version named by a release tag, tolerating legacy pre-0.1.2 "v" tags."""
+    if not isinstance(tag, str):
+        raise ValueError("release tag must be Text")
+    return tag[1:] if tag.startswith("v") else tag
+
+
 def load_config(root=ROOT, *, initialized=False, repository=None, tag=None):
     config = json.loads((Path(root) / "template.json").read_text(encoding="utf-8"))
     if (not isinstance(config, dict) or type(config.get("schema")) is not int
@@ -73,8 +85,8 @@ def load_config(root=ROOT, *, initialized=False, repository=None, tag=None):
             raise ValueError("repository identity must be owner/name")
         if repository.split("/")[1] != config["repository"]:
             raise ValueError("actual repository does not match template.json")
-    if tag is not None and tag != "v" + config["version"]:
-        raise ValueError("release tag must equal v<template.json version>")
+    if tag is not None and tag_version(tag) != config["version"]:
+        raise ValueError("release tag must equal the template.json version (bare SemVer)")
     return config
 
 

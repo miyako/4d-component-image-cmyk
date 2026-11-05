@@ -310,7 +310,7 @@ python3 scripts/ci_config.py download-tool4d --root .
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/compile_component.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d
 python3 scripts/package_component.py --root . --repository miyako/CMYK \
-  --tag v0.1.0 --unpack-test
+  --tag 0.1.0 --unpack-test
 python3 scripts/test_4d.py --root . --tool4d .tools/tool4d.app/Contents/MacOS/tool4d \
   --component build/release-test/CMYK.4dbase
 ```
@@ -371,6 +371,10 @@ snapshot and transports a deterministic version-only commit through a
 checksum-verified Git bundle; every target builds the same unpushed commit.
 Only after all native, compiler, exact-package, signature and Apple notarization
 gates pass does it atomically fast-forward `main` and create the matching tag.
+New tags are bare SemVer (`X.Y.Z` or `X.Y.Z-rc.N`, e.g. `0.1.2`), never
+`v`-prefixed. The legacy `v0.1.0-rc.1`, `v0.1.0-rc.2`, `v0.1.0` and `v0.1.1` tags
+are left untouched and remain resolvable; a bump also refuses a target version
+whose legacy `v` tag already exists.
 It then publishes the already tested assets directly, without relying on a
 `GITHUB_TOKEN` tag push to trigger another workflow.
 

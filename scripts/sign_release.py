@@ -28,7 +28,7 @@ import uuid
 import zipfile
 
 from build_provenance import commit, sha256, source_digest, verify
-from ci_config import ROOT, TARGETS, load_config
+from ci_config import ROOT, TARGETS, load_config, tag_version
 from package_component import validate_compile, write_zip
 from publish_prerelease import presign_assets
 
@@ -247,7 +247,7 @@ def preflight(root, tag, expected_sha, env=None, system=None, candidate=None):
     try:
         release_channel(tag)
     except ValueError:
-        raise SigningError("normalized vSemVer release tag required") from None
+        raise SigningError("normalized SemVer release tag required") from None
     require(isinstance(expected_sha, str) and re.fullmatch(r"[0-9a-f]{40}", expected_sha),
             "expected full commit SHA required")
     require(commit(root) == expected_sha, "checkout HEAD differs from expected SHA")
@@ -692,7 +692,7 @@ def production(root, tool4d, tag, expected_sha, candidate=None):
     output = root / "dist/CMYK.signing.json"
     require(not any(path.is_symlink() for path in (output, *output.parents)), "evidence symlinks prohibited")
     output.parent.mkdir(parents=True, exist_ok=True)
-    report = {"schema": 1, "commit": expected_sha, "version": tag.removeprefix("v"),
+    report = {"schema": 1, "commit": expected_sha, "version": tag_version(tag),
               "finished": False, "result": "failed", "release_ready": False,
               "started_at": datetime.now(timezone.utc).isoformat(), "steps": {},
               "scope": "signed/notarized experimental derivative; not normal 4D application loading",
