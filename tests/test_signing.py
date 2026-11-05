@@ -61,95 +61,44 @@ class Fixture(unittest.TestCase):
         return archive
 
 
-TEST_TAG = "0.1.0-rc.2"
+TEST_TAG = "0.1.2"
 
 
 class PolicyTests(Fixture):
-    def env(self, event="push"):
-        return {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": event,
-                "GITHUB_REF": "refs/tags/" + TEST_TAG, "GITHUB_SHA": SHA,
-                "GITHUB_REPOSITORY": "miyako/CMYK"}
+    def env(self, event="workflow_dispatch", ref="refs/heads/main"):
+        return {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": event, "GITHUB_REF": ref,
+                "GITHUB_SHA": SHA, "GITHUB_REPOSITORY": "miyako/CMYK"}
 
     def preflight(self, env, **kwargs):
-        def command(label, args, **options):
-            if label == "inspect optional preflight tag":
-                return ("refs/tags/" + TEST_TAG + "\n").encode(), b""
-            return (SHA + "\n").encode(), b""
-
         with patch.object(signing, "commit", return_value=SHA), \
-                patch.object(signing, "run", side_effect=command), \
                 patch.object(signing, "load_config", return_value={"repository": "CMYK", "cli": "image-cmyk"}):
             return signing.preflight(self.root, kwargs.get("tag", TEST_TAG),
-                                     kwargs.get("sha", SHA), env, kwargs.get("system", "Darwin"),
-                                     candidate=kwargs.get("candidate"))
+                                     kwargs.get("sha", SHA), env, kwargs.get("system", "Darwin"))
 
-    def test_event_allowlist(self):
+    def test_only_publish_dispatch_on_main_may_sign(self):
         self.preflight(self.env())
-        manual = self.env("workflow_dispatch")
-        manual["GITHUB_REF"] = "refs/heads/main"
-        self.preflight(manual)
-        for event in ("pull_request", "pull_request_target", "workflow_run", "schedule", ""):
+        for event in ("push", "pull_request", "pull_request_target", "workflow_run", "schedule", ""):
             with self.subTest(event=event), self.assertRaises(signing.SigningError):
                 self.preflight(self.env(event))
-        manual["GITHUB_REF"] = "refs/heads/signed-notarized-rc2"
-        with self.assertRaises(signing.SigningError):
-            self.preflight(manual)
+        for ref in ("refs/heads/feature", "refs/tags/" + TEST_TAG):
+            with self.subTest(ref=ref), self.assertRaises(signing.SigningError):
+                self.preflight(self.env(ref=ref))
 
-    def test_untagged_main_preflight_requires_dispatched_sha(self):
-        env = self.env("workflow_dispatch")
-        env["GITHUB_REF"] = "refs/heads/main"
-        with patch.object(signing, "commit", return_value=SHA), \
-                patch.object(signing, "run", return_value=(b"", b"")) as command, \
-                patch.object(signing, "load_config", return_value={"repository": "CMYK", "cli": "image-cmyk"}):
-            signing.preflight(self.root, TEST_TAG, SHA, env, "Darwin")
-            self.assertEqual(command.call_count, 1)
-            self.assertEqual(command.call_args.args[0], "inspect optional preflight tag")
-            env["GITHUB_SHA"] = "d" * 40
-            with self.assertRaisesRegex(signing.SigningError, "exact dispatched main SHA"):
-                signing.preflight(self.root, TEST_TAG, SHA, env, "Darwin")
-
-    def test_existing_tag_dispatch_may_target_an_older_verified_commit(self):
-        env = self.env("workflow_dispatch")
-        env["GITHUB_REF"] = "refs/heads/main"
-        env["GITHUB_SHA"] = "d" * 40
-        self.preflight(env)
-
-    def test_signing_accepts_synchronized_stable_versions_not_a_hardcoded_rc(self):
-        env = self.env()
-        env["GITHUB_REF"] = "refs/tags/1.2.3"
-        self.preflight(env, tag="1.2.3")
-
-    def test_untagged_candidate_requires_production_validation_and_matching_tag(self):
-        env = self.env("workflow_dispatch")
-        env["GITHUB_REF"] = "refs/heads/main"
-        directory = self.root / "candidate"
-        with patch("bump_release.validate_candidate", return_value={"tag": TEST_TAG}) as validate:
-            self.preflight(env, candidate=directory)
-            validate.assert_called_once_with(self.root, directory, SHA, production=True)
-        with patch("bump_release.validate_candidate", return_value={"tag": "9.0.0"}):
-            with self.assertRaises(signing.SigningError):
-                self.preflight(env, candidate=directory)
-        with self.assertRaises(signing.SigningError):
-            self.preflight(self.env(), candidate=directory)
-
-    def test_head_tag_platform_and_version(self):
-        for args in ({"sha": "c" * 40}, {"sha": "bad"}, {"tag": "0.1.0-rc.1"}, {"system": "Windows"}):
+    def test_head_version_and_platform(self):
+        for args in ({"sha": "c" * 40}, {"sha": "bad"}, {"tag": "0.1.0-rc.1"}, {"tag": "v0.1.2"},
+                     {"system": "Windows"}):
             with self.subTest(args=args), self.assertRaises(signing.SigningError):
                 self.preflight(self.env(), **args)
         wrong = self.env()
-        wrong["GITHUB_SHA"] = "d" * 40
+        wrong["GITHUB_REPOSITORY"] = "someone/CMYK"
         with self.assertRaises(signing.SigningError):
             self.preflight(wrong)
-        with patch.object(signing, "commit", return_value=SHA), \
-                patch.object(signing, "run", return_value=(("d" * 40).encode(), b"")):
-            with self.assertRaises(signing.SigningError):
-                signing.preflight(self.root, TEST_TAG, SHA, self.env(), "Darwin")
 
     def test_real_config_version_guard(self):
         # Run the existing configuration validator against a deliberately stale
         # package, without touching the actual branch's concurrently edited files.
         config = {"schema": 1, "initialized": False, "repository": "CMYK", "cli": "image-cmyk",
-                  "version": "0.1.0-rc.1", "language": None}
+                  "version": "0.1.1", "language": None}
         self.file("template.json", json.dumps(config).encode())
         self.file("package.json", json.dumps({"name": "CMYK", "version": config["version"]}).encode())
         with self.assertRaisesRegex(ValueError, "tag"):
@@ -288,7 +237,7 @@ class PayloadTests(Fixture):
 class PresignTests(Fixture):
     def evidence(self):
         archive = self.archive()
-        config = {"version": "0.1.0-rc.2"}
+        config = {"version": "0.1.2"}
         compiler = {"success": True, "errors": [], "targets": ["x86_64_generic", "arm64_macOS_lib"],
                     "input_sha256": "1" * 64, "output_sha256": "2" * 64}
         steps = {name: {"status": "passed"} for name in
@@ -753,7 +702,7 @@ class PipelineTests(Fixture):
         for name in signing.CODE:
             self.file("component/CMYK/" + name, (unsigned / name).read_bytes())
         shutil.rmtree(unsigned.parent)
-        config = {"version": "0.1.0-rc.2"}
+        config = {"version": "0.1.2"}
         certificate = {name: "placeholder" for name in signing.SECRETS}
         certificate["NOTARYTOOL_TEAM_ID"] = TEAM
         signed_location = []
@@ -792,7 +741,7 @@ class PipelineTests(Fixture):
             if label == "submit DMG for notarization":
                 return json.dumps({"status": "Accepted", "id": str(uuid.uuid4())}).encode(), b""
             if label == "signed CLI version smoke":
-                return b'{"protocol":1,"version":"0.1.0-rc.2"}\n', b""
+                return b'{"protocol":1,"version":"0.1.2"}\n', b""
             if label == "signed compiled tool4d harness":
                 self.file("build/host-status.json", json.dumps({
                     "success": True, "finished": True, "compiled": True,

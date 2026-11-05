@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Publish verified signed CMYK assets with an explicit SemVer release channel."""
+"""Validate signed CMYK assets and publish them as a GitHub release named X.Y.Z.
+
+The tag X.Y.Z (bare, no "v") is created by GitHub when the verified draft is
+published, pointing at the exact commit that was built, signed and notarized.
+"""
 import argparse
 import json
 from pathlib import Path
@@ -11,11 +15,9 @@ import uuid
 
 from build_provenance import commit, sha256, source_digest, verify
 from ci_config import ROOT, TARGETS, load_config
-from release_ref import validate_tag, verify as verify_tag
-from bump_release import release_channel
 
 
-NOTES = """Experimental CMYK release candidate: macOS Developer ID signed and Apple notarized.
+NOTES = """CMYK release: macOS Developer ID signed and Apple notarized.
 
 ```4d
 var $converter : cs.CMYK.Converter
@@ -26,36 +28,19 @@ Convert original files with `convertFile(source; destination; options)`, supplyi
 a licensed CMYK ICC as the required `options.destinationProfile` File.
 Inspect with `inspectFile(file)`. No proprietary press profile is bundled.
 
-Input: 8-bit RGB/CMYK JPEG, non-interlaced/non-animated RGB PNG, or bounded
-single-page classic stripped contiguous RGB/CMYK TIFF. Output: CMYK TIFF/JPEG
-with exact destination ICC bytes. Alpha/transparency, non-top-left orientation,
-unsupported depths/layouts and existing destinations are rejected. Untagged RGB
-requires an explicit source ICC or explicit sRGB assumption; CMYK requires a profile.
-No resizing, PDF, spot-color, separations, soft-proof or color-lossless promise.
-
-Native CLI execution passed on macOS ARM64, Intel and Windows x64. The official
-pinned tool4d 20.7 source/compiled-package harness and actual compiler passed on
-macOS ARM64, including a fresh check of the signed ZIP's unpacked component.
-These tool4d results do NOT establish external-component installation/loading in
-the normal 4D application. Earlier rc1 wording overstated that scope.
-Normal 4D application loading, Intel/Windows 4D and published dependency-manager
-installation remain not_run. Evidence intentionally retains result:partial and
-release_ready:false; this is not full cross-platform/application acceptance.
+Native CLI execution passed on macOS ARM64, Intel and Windows x64. The pinned
+tool4d source/compiled-package harness and actual compiler passed on macOS ARM64,
+including a fresh check of the signed ZIP's unpacked component. These tool4d
+results do NOT establish loading in the normal 4D application; normal 4D
+application loading, Intel/Windows 4D and dependency-manager installation remain
+not_run (evidence keeps result:partial and release_ready:false).
 
 The macOS CLI and native library are Developer ID signed with secure timestamps.
-CMYK.dmg is separately signed, Apple notarization Accepted, stapled and assessed.
-Every macOS payload code object separately passed Apple's online notarization
-check and explicit `notarized` requirement. A bare-CLI spctl non-app diagnostic
-is retained as a failed applicability probe, not claimed as app acceptance.
-CMYK.zip contains the identical signed payload; ZIP itself cannot be stapled.
-Windows is unsigned (no Authenticode credentials); no Windows signing claim.
-Replace the predecessor component/dependency rather than loading both packages.
-The host API is now cs.CMYK.Converter; the former ImageCMYK namespace has no alias.
+CMYK.dmg is signed, notarization Accepted, stapled and assessed. CMYK.zip contains
+the identical signed payload; a ZIP cannot be stapled. Windows is unsigned.
 Download CMYK.zip for the dependency manager, or CMYK.dmg for the notarized macOS
-container. CMYK.signing.json binds final delivered hashes and signing/notary gates.
-CMYK.acceptance.json and CMYK.native-evidence.json deliberately describe the
-pre-sign build/compilation; signing changes native bytes without rewriting those
-original compiler markers or manifests. Unsigned rc1 is preserved separately.
+container. CMYK.signing.json binds final delivered hashes and signing/notary gates;
+CMYK.acceptance.json and CMYK.native-evidence.json describe the pre-sign build.
 """
 
 
@@ -82,7 +67,7 @@ def validate_evidence(root, expected_sha):
     root = Path(root).resolve()
     config = load_config(root, initialized=True)
     if commit(root) != expected_sha:
-        raise ValueError("publication checkout must match the resolved tag")
+        raise ValueError("publication checkout must match the built release commit")
     base = root / "dist" / config["repository"]
     assets = [base.with_suffix(".zip"), base.with_suffix(".acceptance.json"),
               base.with_suffix(".native-evidence.json")]
@@ -138,12 +123,16 @@ def presign_assets(root, expected_sha):
     return assets
 
 
-def publication_assets(root, tag, expected_sha, *, tag_required=True):
-    release_channel(tag)
+def release_version(version):
+    if not isinstance(version, str) or not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
+        raise ValueError("release version must be bare X.Y.Z")
+    return version
+
+
+def publication_assets(root, version, expected_sha):
+    release_version(version)
     root = Path(root).resolve()
-    config = load_config(root, initialized=True, tag=tag)
-    if tag_required:
-        verify_tag(root, tag, expected_sha)
+    config = load_config(root, initialized=True, tag=version)
     assets, acceptance = validate_evidence(root, expected_sha)
     base = root / "dist" / config["repository"]
     dmg = base.with_suffix(".dmg")
@@ -251,76 +240,39 @@ def verify_uploaded_assets(root, tag, assets):
                 raise ValueError("uploaded draft asset differs from validated local bytes: " + asset.name)
 
 
-def release_metadata(root, tag, *, required=True):
-    # The by-tag endpoint excludes drafts, even when the caller can list them.
+def release_exists(root, tag):
+    # The by-tag endpoint excludes drafts, so list every release instead.
     result = subprocess.run(["gh", "api", "repos/{owner}/{repo}/releases?per_page=100",
                              "--paginate", "--slurp"],
                             cwd=root, check=True, capture_output=True, text=True)
-    matching = [release for page in json.loads(result.stdout) for release in page
-                if release.get("tag_name") == tag]
-    if not matching and not required:
-        return None
-    if len(matching) != 1:
-        raise ValueError("exactly one owned draft or published release must match the tag")
-    return matching[0]
+    return any(release.get("tag_name") == tag for page in json.loads(result.stdout) for release in page)
 
 
-def publish(root, tag, expected_sha):
-    assets = publication_assets(root, tag, expected_sha)
-    channel = release_channel(tag)
+def tag_exists(root, tag):
+    result = subprocess.run(["git", "ls-remote", "--tags", "origin", "refs/tags/" + tag, "refs/tags/v" + tag],
+                            cwd=root, check=True, capture_output=True, text=True)
+    return bool(result.stdout.strip())
+
+
+def publish(root, version, expected_sha):
+    """Create draft X.Y.Z at the built commit, verify uploads, then publish as Latest."""
+    assets = publication_assets(root, version, expected_sha)
+    if tag_exists(root, version) or release_exists(root, version):
+        raise ValueError("tag or release " + version + " already exists; Publish never reuses a version")
     marker = "\n\nVerified release source: " + expected_sha + "\n" + "\n".join(
         path.name + " SHA256: " + sha256(path) for path in assets)
-    notes = NOTES if channel["prerelease"] else NOTES.replace(
-        "Experimental CMYK release candidate:", "CMYK release:", 1)
-    existing = release_metadata(root, tag, required=False)
-    if existing is None:
-        subprocess.run(["gh", "release", "create", tag, *(str(path) for path in assets),
-                        "--verify-tag", "--draft",
-                        "--prerelease" if channel["prerelease"] else "--prerelease=false",
-                        "--latest=false", "--title", "CMYK " + tag + " (signed macOS)",
-                        "--notes", notes + marker], cwd=root, check=True)
-    else:
-        if (existing.get("prerelease") is not channel["prerelease"]
-                or not isinstance(existing.get("body"), str) or not existing["body"].endswith(marker)):
-            raise ValueError("existing release does not match this exact source, channel and asset hashes")
-        if existing.get("draft") is True:
-            names = [entry["name"] for entry in existing["assets"]]
-            if len(names) != len(set(names)):
-                raise ValueError("duplicate draft asset names")
-            verify_uploaded_assets(root, tag, [path for path in assets if path.name in names])
-            for path in assets:
-                if path.name not in names:
-                    subprocess.run(["gh", "release", "upload", tag, str(path)], cwd=root, check=True)
-        elif existing.get("draft") is False:
-            pass
-        else:
-            raise ValueError("existing release has invalid draft status")
-    verify_uploaded_assets(root, tag, assets)
+    subprocess.run(["gh", "release", "create", version, *(str(path) for path in assets),
+                    "--target", expected_sha, "--draft", "--title", version,
+                    "--notes", NOTES + marker], cwd=root, check=True)
+    verify_uploaded_assets(root, version, assets)
+    subprocess.run(["gh", "release", "edit", version, "--draft=false", "--latest"], cwd=root, check=True)
     subprocess.run(["git", "fetch", "--force", "--no-tags", "origin",
-                    "+refs/tags/" + tag + ":refs/tags/" + tag], cwd=root, check=True)
-    verify_tag(root, tag, expected_sha)
-    draft = release_metadata(root, tag)
-    if existing is not None and existing.get("draft") is False:
-        final = draft
-    else:
-        if (draft.get("draft") is not True or draft.get("prerelease") is not channel["prerelease"]
-                or type(draft.get("id")) is not int or draft["id"] <= 0):
-            raise ValueError("release must remain an owned draft in the selected channel until verification")
-        subprocess.run(["gh", "api", "--method", "PATCH",
-                        "repos/{owner}/{repo}/releases/" + str(draft["id"]),
-                        "-F", "draft=false", "-F", "prerelease=" + str(channel["prerelease"]).lower(),
-                        "-f", "make_latest=" + str(channel["latest"]).lower()], cwd=root, check=True)
-        final = release_metadata(root, tag)
-    if final.get("draft") is not False or final.get("prerelease") is not channel["prerelease"]:
-        raise ValueError("published release is not in the authorized public channel")
-    if channel["latest"]:
-        latest = subprocess.run(["gh", "api", "repos/{owner}/{repo}/releases/latest"],
-                                cwd=root, check=True, capture_output=True, text=True)
-        if json.loads(latest.stdout).get("tag_name") != tag:
-            raise ValueError("published stable release is not GitHub Latest")
-    if existing is None or existing.get("draft") is True:
-        verify_uploaded_assets(root, tag, assets)
-    return final
+                    "+refs/tags/" + version + ":refs/tags/" + version], cwd=root, check=True)
+    resolved = subprocess.run(["git", "rev-parse", "--verify", "refs/tags/" + version + "^{commit}"],
+                              cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    if resolved != expected_sha:
+        raise ValueError("published tag does not point at the built commit")
+    return version
 
 
 def main():
@@ -330,20 +282,20 @@ def main():
     mode.add_argument("--write-native-evidence", action="store_true")
     mode.add_argument("--validate-signed", action="store_true",
                       help="validate final signed bytes without creating a tag or publishing")
-    parser.add_argument("--tag")
+    parser.add_argument("--version", help="bare X.Y.Z release version")
     parser.add_argument("--expected-sha")
     args = parser.parse_args()
     try:
         if args.write_native_evidence:
             print(write_native_evidence(args.root))
         else:
-            if not args.tag or not args.expected_sha:
-                raise ValueError("publication requires tag and expected SHA")
+            if not args.version or not args.expected_sha:
+                raise ValueError("publication requires --version and --expected-sha")
             if args.validate_signed:
-                publication_assets(args.root, args.tag, args.expected_sha, tag_required=False)
+                publication_assets(args.root, args.version, args.expected_sha)
                 print("Final signed distribution evidence validated; no tag or publication created.")
             else:
-                publish(args.root, args.tag, args.expected_sha)
+                publish(args.root, args.version, args.expected_sha)
     except (ValueError, OSError, KeyError, TypeError, subprocess.SubprocessError) as error:
         parser.exit(1, f"release publication failed: {error}\n")
 

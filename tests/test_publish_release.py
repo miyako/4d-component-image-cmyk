@@ -12,19 +12,19 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-import publish_prerelease as publisher
+import publish_release as publisher
 
 
-class PrereleaseTests(unittest.TestCase):
+class PublishReleaseTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix=".prerelease-test-", dir=ROOT)
+        self.temporary = tempfile.TemporaryDirectory(prefix=".publish-release-test-", dir=ROOT)
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.dist = self.root / "dist"
         self.dist.mkdir()
         self.sha = "a" * 40
         self.digest = "b" * 64
-        self.config = {"repository": "CMYK", "version": "0.1.0-rc.2", "cli": "image-cmyk"}
+        self.config = {"repository": "CMYK", "version": "0.1.2", "cli": "image-cmyk"}
         (self.dist / "CMYK.zip").write_bytes(b"synthetic archive bytes")
         (self.dist / "CMYK.dmg").write_bytes(b"synthetic signed disk image")
         self.report = {
@@ -90,7 +90,7 @@ class PrereleaseTests(unittest.TestCase):
                              "--check-notarization", "-R=notarized", "/staging/" + path]}
                 for path in before if path != "CMYK.4DZ"]}
         for name, value in (("load_config", self.config), ("commit", self.sha),
-                            ("source_digest", self.digest), ("verify_tag", self.sha)):
+                            ("source_digest", self.digest)):
             mock = patch.object(publisher, name, return_value=value)
             mock.start()
             self.addCleanup(mock.stop)
@@ -104,87 +104,64 @@ class PrereleaseTests(unittest.TestCase):
         (self.dist / "CMYK.signing.json").write_text(json.dumps(self.signing))
 
     def validate(self):
-        return publisher.publication_assets(self.root, "0.1.0-rc.2", self.sha)
+        return publisher.publication_assets(self.root, "0.1.2", self.sha)
 
-    def test_channel_distinguishes_prerelease_from_build_metadata(self):
-        for tag in ("0.1.0-rc.1", "1.2.3-beta+build-id"):
-            self.assertEqual(publisher.release_channel(tag), {"prerelease": True, "latest": False})
-        for tag in ("0.1.0", "1.2.3+build-with-hyphen"):
-            self.assertEqual(publisher.release_channel(tag), {"prerelease": False, "latest": True})
-        for tag in ("main", "01.0.0-rc.1", "1.0.0-01"):
-            with self.subTest(tag=tag), self.assertRaises(ValueError):
-                publisher.release_channel(tag)
+    def test_version_must_be_bare_stable_semver(self):
+        for version in ("0.1.2", "10.0.0"):
+            self.assertEqual(publisher.release_version(version), version)
+        for version in ("v0.1.2", "0.1.2-rc.1", "01.0.0", "main", None):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                publisher.release_version(version)
 
-    def test_create_is_atomically_prerelease_never_latest(self):
-        with patch.object(publisher.subprocess, "run") as run, \
-                patch.object(publisher, "verify_uploaded_assets") as verify_upload, \
-                patch.object(publisher, "release_metadata", side_effect=[
-                    None, {"id": 123, "draft": True, "prerelease": True},
-                    {"draft": False, "prerelease": True}]):
-            publisher.publish(self.root, "0.1.0-rc.2", self.sha)
-        args = run.call_args_list[0].args[0]
-        self.assertEqual(args[:4], ["gh", "release", "create", "0.1.0-rc.2"])
-        for flag in ("--draft", "--prerelease", "--latest=false", "--verify-tag"):
-            self.assertIn(flag, args)
-        self.assertTrue(run.call_args.kwargs["check"])
-        self.assertEqual(len([arg for arg in args if arg.endswith(".json")]), 3)
-        self.assertEqual(verify_upload.call_count, 2)
-        self.assertEqual(run.call_args.args[0][:4], ["gh", "api", "--method", "PATCH"])
-        self.assertIn("prerelease=true", run.call_args.args[0])
-        self.assertIn("make_latest=false", run.call_args.args[0])
+    def run_publish(self, *, tag_exists=False, release_exists=False, resolved=None, verify=None):
+        calls = []
 
-    def test_stable_release_is_created_stable_and_explicitly_latest_after_verification(self):
-        response = subprocess.CompletedProcess([], 0, stdout='{"tag_name":"0.1.0"}')
-        with patch.object(publisher, "publication_assets", return_value=[]), \
-                patch.object(publisher, "verify_uploaded_assets") as verify_upload, \
-                patch.object(publisher, "verify_tag"), \
-                patch.object(publisher.subprocess, "run", return_value=response) as run, \
-                patch.object(publisher, "release_metadata", side_effect=[
-                    None, {"id": 124, "draft": True, "prerelease": False},
-                    {"draft": False, "prerelease": False}]):
-            publisher.publish(self.root, "0.1.0", self.sha)
-        self.assertIn("--prerelease=false", run.call_args_list[0].args[0])
-        self.assertIn("make_latest=true", run.call_args_list[-2].args[0])
-        self.assertIn("prerelease=false", run.call_args_list[-2].args[0])
-        self.assertEqual(verify_upload.call_count, 2)
+        def run(args, **kwargs):
+            calls.append(args)
+            if args[:2] == ["git", "rev-parse"]:
+                return subprocess.CompletedProcess(args, 0, stdout=(resolved or self.sha) + "\n")
+            return subprocess.CompletedProcess(args, 0, stdout="")
 
-    def test_existing_release_requires_same_source_channel_and_asset_hashes(self):
-        with patch.object(publisher, "release_metadata", return_value={
-                "draft": True, "prerelease": True, "body": "unrelated existing draft"}), \
-                patch.object(publisher.subprocess, "run") as run:
-            with self.assertRaisesRegex(ValueError, "exact source"):
-                publisher.publish(self.root, "0.1.0-rc.2", self.sha)
-        run.assert_not_called()
+        with patch.object(publisher.subprocess, "run", side_effect=run), \
+                patch.object(publisher, "tag_exists", return_value=tag_exists), \
+                patch.object(publisher, "release_exists", return_value=release_exists), \
+                patch.object(publisher, "verify_uploaded_assets", side_effect=verify) as uploaded:
+            publisher.publish(self.root, "0.1.2", self.sha)
+        return calls, uploaded
 
-    def test_matching_published_retry_verifies_bytes_and_remote_tag_without_mutation(self):
-        assets = self.validate()
-        marker = "\n\nVerified release source: " + self.sha + "\n" + "\n".join(
-            path.name + " SHA256: " + publisher.sha256(path) for path in assets)
-        existing = {"draft": False, "prerelease": True, "body": "notes" + marker}
-        with patch.object(publisher, "release_metadata", return_value=existing), \
-                patch.object(publisher, "verify_uploaded_assets") as download, \
-                patch.object(publisher.subprocess, "run") as run:
-            publisher.publish(self.root, "0.1.0-rc.2", self.sha)
-        download.assert_called_once()
-        self.assertEqual(run.call_count, 1)
-        self.assertEqual(run.call_args.args[0][:2], ["git", "fetch"])
+    def test_publish_creates_verified_draft_then_latest_release_at_built_commit(self):
+        calls, uploaded = self.run_publish()
+        create = calls[0]
+        self.assertEqual(create[:4], ["gh", "release", "create", "0.1.2"])
+        self.assertEqual(create[create.index("--target") + 1], self.sha)
+        self.assertEqual(create[create.index("--title") + 1], "0.1.2")
+        self.assertIn("--draft", create)
+        self.assertNotIn("--prerelease", create)
+        self.assertEqual(len([arg for arg in create if arg.endswith(".json")]), 3)
+        uploaded.assert_called_once()
+        self.assertEqual(calls[1], ["gh", "release", "edit", "0.1.2", "--draft=false", "--latest"])
 
-    def test_partial_owned_draft_uploads_only_missing_identical_candidate_assets(self):
-        assets = self.validate()
-        marker = "\n\nVerified release source: " + self.sha + "\n" + "\n".join(
-            path.name + " SHA256: " + publisher.sha256(path) for path in assets)
-        draft = {"id": 125, "draft": True, "prerelease": True, "body": "notes" + marker,
-                 "assets": [{"name": path.name} for path in assets[:-1]]}
-        with patch.object(publisher, "release_metadata", side_effect=[
-                draft, draft, {"draft": False, "prerelease": True}]), \
-                patch.object(publisher, "verify_uploaded_assets") as download, \
-                patch.object(publisher.subprocess, "run") as run:
-            publisher.publish(self.root, "0.1.0-rc.2", self.sha)
-        self.assertEqual(run.call_args_list[0].args[0],
-                         ["gh", "release", "upload", "0.1.0-rc.2", str(assets[-1])])
-        self.assertEqual(download.call_args_list[0].args[2], assets[:-1])
-        self.assertEqual(download.call_count, 3)
-        self.assertFalse(any("--clobber" in call.args[0] for call in run.call_args_list))
+    def test_publish_never_reuses_an_existing_tag_or_release(self):
+        for kwargs in ({"tag_exists": True}, {"release_exists": True}):
+            with self.subTest(**kwargs), self.assertRaisesRegex(ValueError, "already exists"):
+                self.run_publish(**kwargs)
+
+    def test_publish_keeps_draft_when_uploaded_bytes_differ(self):
+        with self.assertRaisesRegex(ValueError, "changed"):
+            calls, _ = self.run_publish(verify=ValueError("changed"))
+
+    def test_publish_rejects_tag_not_at_built_commit(self):
+        with self.assertRaisesRegex(ValueError, "built commit"):
+            self.run_publish(resolved="f" * 40)
+
+    def test_existing_release_lookup_includes_drafts_across_pages(self):
+        pages = [[{"tag_name": "0.1.1", "draft": False}], [{"tag_name": "0.1.2", "draft": True}]]
+        result = publisher.subprocess.CompletedProcess([], 0, stdout=json.dumps(pages))
+        with patch.object(publisher.subprocess, "run", return_value=result) as run:
+            self.assertTrue(publisher.release_exists(self.root, "0.1.2"))
+            self.assertFalse(publisher.release_exists(self.root, "0.1.3"))
+        self.assertIn("--paginate", run.call_args.args[0])
+        self.assertNotIn("/tags/", " ".join(run.call_args.args[0]))
 
     def test_rejects_missing_failed_or_wrong_mode_host_gate(self):
         original = copy.deepcopy(self.report)
@@ -253,24 +230,6 @@ class PrereleaseTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.validate()
 
-    def test_never_promotes_draft_if_uploaded_bytes_fail(self):
-        with patch.object(publisher.subprocess, "run") as run, \
-                patch.object(publisher, "release_metadata", return_value=None), \
-                patch.object(publisher, "verify_uploaded_assets", side_effect=ValueError("changed")):
-            with self.assertRaisesRegex(ValueError, "changed"):
-                publisher.publish(self.root, "0.1.0-rc.2", self.sha)
-        self.assertEqual(run.call_count, 1)
-        self.assertIn("--draft", run.call_args.args[0])
-
-    def test_preflight_validates_final_assets_without_requiring_or_creating_tag(self):
-        with patch.object(publisher, "verify_tag") as verify, \
-                patch.object(publisher.subprocess, "run") as run:
-            assets = publisher.publication_assets(
-                self.root, "0.1.0-rc.2", self.sha, tag_required=False)
-        self.assertEqual(len(assets), 5)
-        verify.assert_not_called()
-        run.assert_not_called()
-
     def test_requires_direct_ticket_checks_even_for_known_non_app_probe(self):
         assessment = self.signing["steps"]["payload_assessment"]["details"]
         assessment["cli_spctl"] = {
@@ -304,7 +263,7 @@ class PrereleaseTests(unittest.TestCase):
             (output / name).write_bytes((self.dist / name).read_bytes())
 
         with patch.object(publisher.subprocess, "run", side_effect=download) as run:
-            publisher.verify_uploaded_assets(self.root, "0.1.0-rc.2", assets)
+            publisher.verify_uploaded_assets(self.root, "0.1.2", assets)
         self.assertEqual(run.call_count, 2)
 
         def corrupted(args, **kwargs):
@@ -313,27 +272,11 @@ class PrereleaseTests(unittest.TestCase):
 
         with patch.object(publisher.subprocess, "run", side_effect=corrupted):
             with self.assertRaisesRegex(ValueError, "differs"):
-                publisher.verify_uploaded_assets(self.root, "0.1.0-rc.2", assets)
-
-    def test_release_metadata_finds_draft_across_pages_not_published_only_tag_endpoint(self):
-        pages = [[{"tag_name": "0.1.0-rc.1", "draft": False}],
-                 [{"tag_name": "0.1.0-rc.2", "draft": True, "prerelease": True}]]
-        result = publisher.subprocess.CompletedProcess([], 0, stdout=json.dumps(pages))
-        with patch.object(publisher.subprocess, "run", return_value=result) as run:
-            metadata = publisher.release_metadata(self.root, "0.1.0-rc.2")
-        self.assertTrue(metadata["draft"])
-        self.assertIn("--paginate", run.call_args.args[0])
-        self.assertIn("--slurp", run.call_args.args[0])
-        self.assertNotIn("/tags/", " ".join(run.call_args.args[0]))
-        for invalid in ([], [[pages[1][0], pages[1][0]]]):
-            result.stdout = json.dumps(invalid)
-            with patch.object(publisher.subprocess, "run", return_value=result):
-                with self.assertRaises(ValueError):
-                    publisher.release_metadata(self.root, "0.1.0-rc.2")
+                publisher.verify_uploaded_assets(self.root, "0.1.2", assets)
 
     def test_relative_root_produces_absolute_upload_paths(self):
         assets = publisher.publication_assets(
-            self.root.relative_to(ROOT), "0.1.0-rc.2", self.sha)
+            self.root.relative_to(ROOT), "0.1.2", self.sha)
         self.assertTrue(all(path.is_absolute() for path in assets))
 
     def test_writer_requires_native_execution(self):

@@ -275,27 +275,19 @@ and `shutdown-probe/result{,-return,-return21}.json`. A successful JSON report
 from a crashed process is **not** a passed acceptance check.
 
 The historical compiled candidate is unsigned and available for review/testing; CI artifacts
-are distinct from published experimental prereleases under GitHub Releases.
+are distinct from releases published by the Publish workflow.
 Intel/Windows 4D acceptance and actual published installation
 remain separate checks. Any proposed compiler-baseline change requires a
 separate explicit decision.
 
 ### Source and compiled-mode tool4d harness checks
 
-For an isolated hosted attempt without changing repository variables, dispatch
-**Actions > CI > Run workflow**, select the implementation branch and enable
-`accept_4d`. From the CLI:
-
-```sh
-gh workflow run ci.yml --ref main -f accept_4d=true
-```
-
-This rebuilds all three native targets at the selected commit, then runs the
-existing strict acceptance helper on hosted macOS 15 ARM64. The explicit opt-in
-uses the default `package.json.tool` checksum pin, not repository URL overrides.
-It uploads `four-d-acceptance` containing reports/logs even on failure, and the
-ZIP plus adjacent evidence JSON only if packaging reaches those stages.
-No tag, publication, signing or persistent `FOURD_ENABLED` change is performed.
+When the repository variable `FOURD_ENABLED=true` is set, every CI push and
+pull request rebuilds all three native targets, then runs the existing strict
+acceptance helper on hosted macOS 15 ARM64 with the default `package.json.tool`
+checksum pin. It uploads `four-d-acceptance` containing reports/logs even on
+failure, and the ZIP plus adjacent evidence JSON only if packaging reaches those
+stages. CI performs no tag, publication or signing.
 A failed process remains a failed job; a single component-free shutdown probe
 is retained after acceptance failure. The helper's `release_ready:false` and
 untested normal 4D application/Intel/Windows 4D/install/signing checks must not
@@ -342,85 +334,52 @@ The unsigned artifact/evidence pair is
 `build/compile-status.json` for the actual revision, hashes, tools and results.
 No signing, notarization, publication or download/install success is implied.
 
-## Bump and release
+## Publish
 
-After this workflow is merged, open **Actions > Bump and release > Run workflow**
-on `main`. Choose `major`, `minor`, `patch` or `promote`. **Dry run is enabled
-by default**: it builds a disposable, unpushed version candidate, executes the
-three native CLI targets and pinned 20.7 tool4d/compiler/package gates, then
-downloads and verifies that exact compiled ZIP in a separate job. It uses no
-signing secrets and changes no remote branch, tag or release.
-
-| Choice | Rule | From `0.1.0` |
-| --- | --- | --- |
-| `major` | Increment major, reset minor/patch | `1.0.0` |
-| `minor` | Increment minor, reset patch | `0.2.0` |
-| `patch` | Increment the numeric patch | `0.1.1` |
-| `promote` | Remove prerelease/build metadata without changing the core | rejected (already stable) |
-
-These choices produce stable versions and discard build metadata; `promote`
-rejects an already stable version. They do not increment an RC counter.
-`package.json.version` is authoritative, while `template.json`, native CLI
-version, host version assertions and the current class-documentation example
-must remain synchronized. Historical release facts are not rewritten.
-For a read-only local plan, run `python3 scripts/bump_release.py plan --bump patch`.
-
-Unchecking **Dry run** explicitly requests production signing and publication.
-Production dispatch is restricted to `main`. The workflow resolves one base
-snapshot and transports a deterministic version-only commit through a
-checksum-verified Git bundle; every target builds the same unpushed commit.
-Only after all native, compiler, exact-package, signature and Apple notarization
-gates pass does it atomically fast-forward `main` and create the matching tag.
-New tags are bare SemVer (`X.Y.Z` or `X.Y.Z-rc.N`, e.g. `0.1.2`), never
-`v`-prefixed. The legacy `v0.1.0-rc.1`, `v0.1.0-rc.2`, `v0.1.0` and `v0.1.1` tags
-are left untouched and remain resolvable; a bump also refuses a target version
-whose legacy `v` tag already exists.
-It then publishes the already tested assets directly, without relying on a
-`GITHUB_TOKEN` tag push to trigger another workflow.
-
-Runs are serialized. A moved `main`, conflicting tag, dirty checkout or branch
-protection rejection fails closed; no force push, protection bypass or existing
-asset overwrite is used. Candidate source and accepted artifacts are retained
-for 30 days. After a publication interruption, retry the failed publication job
-with its original candidate/assets, not a second version bump: resume accepts
-only the identical source, channel and asset hashes.
-
-New SemVer prereleases publish as `prerelease:true`, never Latest. Stable tags
-publish as `prerelease:false` and explicitly Latest; a hyphen in build metadata
-alone is not a prerelease. This feature does not alter the existing `v0.1.0` and rc tags,
-assets or externally edited release flags. Workflow validation/merge is not
-permission to execute a production bump.
-
-## Signed macOS release workflow
-
-After the reviewed workflow is merged to `main`, manually dispatch **Actions >
-Release compiled component > Run workflow**, select `main`, set `preflight:true`
-and leave `version_tag` empty:
+Releases are made by a single workflow: **Actions → Publish → Run workflow**,
+choose `patch`, `minor` or `major` (default `patch`), and run it on `main`:
 
 ```sh
-gh workflow run release.yml --ref main -f preflight=true
+gh workflow run publish.yml --ref main -f mode=patch
 ```
 
-Preflight cannot reuse a version tag already bound to another commit. After
-changes to an already tagged version, use the **Bump and release** dry run to
-validate a new candidate; never move the existing tag.
+| Mode | Rule | From latest tag `v0.1.1` |
+| --- | --- | --- |
+| `patch` | Increment the patch number | `0.1.2` |
+| `minor` | Increment minor, reset patch | `0.2.0` |
+| `major` | Increment major, reset minor/patch | `1.0.0` |
 
-This preflight is intended to build, sign and notarize without creating a tag
-or publishing a release. It still requires the hosted 4D opt-in
-`FOURD_ENABLED=true`. The six required signing/notarization secrets are already
-registered; registration is **not** evidence that Apple accepted a submission
-or that any signed run passed.
+Publish:
 
-The production flow signs the macOS universal CLI and compiled native
-library, then produces a signed, notarized and stapled DMG separately from
-`CMYK.zip`. The ZIP contains the identical component payload, but **a ZIP
-cannot be stapled**; the stapled ticket belongs to the DMG. Windows binaries
-remain unsigned. Acceptance and native build manifests describe **presign**
-bytes; final distribution and signed-payload hashes belong to
-`CMYK.signing.json`. Do not treat presign hashes as hashes of final signed
-assets. The final signed package must undergo another strict tool4d harness
-run; that rerun still does **not** validate normal external component
-installation/loading in the actual 4D application.
+1. computes the next version from the **latest stable SemVer tag** (legacy
+   `v`-prefixed tags such as `v0.1.1` are read; prerelease tags such as
+   `v0.1.0-rc.2` are ignored; with no tag it bumps `package.json.version`),
+   preview it locally with `python3 scripts/bump_release.py next --mode patch`;
+2. writes that version to `package.json`, `template.json`, the host contract
+   version assertions and the class-documentation example
+   (`scripts/bump_release.py apply`) and commits `Release X.Y.Z` to `main`;
+3. builds the three native CLI targets by reusing CI, then runs the pinned
+   tool4d source harness, compiler, packaging and compiled-package harness
+   (`scripts/accept_local.py`);
+4. codesigns and notarizes with the six repository secrets
+   (`scripts/sign_release.py`) and validates the signed evidence;
+5. creates the bare tag `X.Y.Z` (never `v`-prefixed) and a GitHub release named
+   `X.Y.Z`, marked Latest, with `CMYK.zip`, `CMYK.dmg` and the evidence JSON
+   (`scripts/publish_release.py`).
+
+Runs are serialized. Publish never reuses an existing tag or release and never
+force-pushes. If a run fails after the version commit, run Publish again with
+the same mode: the version is computed from tags, so the same `X.Y.Z` is
+retried and the already-applied version commit is reused.
+
+The signed flow signs the macOS universal CLI and compiled native library, then
+produces a signed, notarized and stapled DMG separately from `CMYK.zip`. The ZIP
+contains the identical component payload, but **a ZIP cannot be stapled**; the
+stapled ticket belongs to the DMG. Windows binaries remain unsigned. Acceptance
+and native build manifests describe **presign** bytes; final distribution and
+signed-payload hashes belong to `CMYK.signing.json`. The final signed package
+undergoes another strict tool4d harness run; that rerun still does **not**
+validate normal external component installation/loading in the 4D application.
 
 Payload trust checks reuse the exact commands verified against the published
 [Text-to-SVG v0.1.1 release](https://github.com/miyako/Text-to-SVG/releases/tag/v0.1.1)
@@ -430,23 +389,12 @@ for **each** Mach-O payload, plus `spctl --type open` for the signed DMG.
 The reference's genuinely notarized bare CLI also produces `spctl`'s
 "the code is valid but does not seem to be an app" rejection. CMYK records that
 exact diagnostic as a failed, non-applicable CLI probe, never as acceptance;
-any other rejection remains fatal. Direct online notarization and DMG Gatekeeper
-checks remain mandatory, not fallback successes.
+any other rejection remains fatal.
 
-The compiler harness runs from an isolated copy under `build/`, not its
-versioned project: tool4d creates a catalog and DerivedData on opening a project.
-The post-compiler candidate checkpoint still requires a clean source checkout;
-runtime caches are not an excuse to ignore or reset source changes.
-
-Only a completed successful preflight establishes the recorded gates. Evidence
-retains partial acceptance and `release_ready:false` because the automated
-harness does not establish full normal-application/cross-platform acceptance.
-The existing-tag release entrypoint accepts an already existing matching
-SemVer tag; the bump entrypoint above prepares a new version/tag only after
-its gates. Preflight creates no tag, and merging source changes alone is not
-permission to tag or publish. Published `v0.1.0`, signed rc2 and unsigned rc1 remain intact.
-`CMYK.acceptance.json`, `CMYK.native-evidence.json` and `CMYK.signing.json`
-distinguish the presign observations from final signed-byte evidence.
+Evidence retains partial acceptance and `release_ready:false` because the
+automated harness does not establish full normal-application/cross-platform
+acceptance. Existing releases (`v0.1.0-rc.1`, `v0.1.0-rc.2`, `v0.1.0`, `v0.1.1`)
+are left untouched.
 
 ## Installation instructions (normal application validation still required)
 

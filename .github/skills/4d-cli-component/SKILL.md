@@ -45,8 +45,11 @@ scripts/tests. Resolve all paths below from the repository root, not this folder
    paths, `passed` / `failed` / `not_run` per check and blockers. Partial local success
    is **NOT release ready**. Do not publish or add credentials without approval.
    Unsigned free tool4d local compilation needs no license/signing secrets.
-   This adopted CMYK release workflow uses the six production-only Apple secrets
-   documented in AGENTS.md; credential registration alone is not signing evidence.
+   Releases use the single **Actions → Publish → Run workflow** flow (choose
+   `patch`, `minor` or `major`); it bumps from the latest tag, commits the
+   version to `main`, builds, signs/notarizes with the six Apple secrets
+   documented in AGENTS.md and publishes tag/release `X.Y.Z`. Credential
+   registration alone is not signing evidence.
    tool4d harness checks are not proof of normal 4D application component loading.
 
 ## Discovery is supported, invocation is not guaranteed
