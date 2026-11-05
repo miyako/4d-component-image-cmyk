@@ -24,6 +24,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 import uuid
 import zipfile
 
@@ -555,6 +556,98 @@ def accepted_notarization(data):
     return {"status": "Accepted", "id": identifier}
 
 
+NOTARY_CATEGORIES = (
+    ("required agreement", "Apple Developer agreement missing or expired; accept it at developer.apple.com/account", False),
+    ("Invalid credentials", "notary credentials rejected", False),
+    ("not authorized", "notary account not authorized for this team", False),
+    ("network connection", "network failure", True),
+    ("timed out", "network timeout", True),
+    ("Could not connect", "network failure", True),
+    ("upload", "upload failure", True),
+)
+
+
+def notary_failure(process):
+    """Map notarytool failure output to fixed, non-sensitive categories."""
+    output = (process.stdout + process.stderr).decode("utf-8", errors="replace")
+    categories, transient = [], False
+    for token, category, retry in NOTARY_CATEGORIES:
+        if token.lower() in output.lower() and category not in categories:
+            categories.append(category)
+            transient = transient or retry
+    http = re.search(r"HTTP status code: ([0-9]{3})", output)
+    status = int(http[1]) if http else None
+    if status is not None and (status >= 500 or status == 429):
+        transient = True
+    if not categories and status is None:
+        transient = True
+        categories.append("unclassified notarytool failure")
+    response = {}
+    try:
+        decoded = json.loads(process.stdout.decode("utf-8"))
+        if isinstance(decoded, dict):
+            response = decoded
+    except ValueError:
+        pass
+    result = {"exit_code": process.returncode, "http_status": status, "categories": categories,
+              "transient": transient}
+    if isinstance(response.get("status"), str) and re.fullmatch(r"[A-Za-z ]{1,40}", response["status"]):
+        result["status"] = response["status"]
+    try:
+        result["id"] = str(uuid.UUID(response["id"]))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        pass
+    if "id" in result:
+        result["transient"] = False
+    return result
+
+
+def notary_issues(keychain, profile, submission):
+    process = capture("fetch notarization log", ["/usr/bin/xcrun", "notarytool", "log", submission,
+                      "--keychain", str(keychain), "--keychain-profile", profile], timeout=300)
+    try:
+        log = json.loads(process.stdout.decode("utf-8")) if process.returncode == 0 else {}
+    except ValueError:
+        log = {}
+    issues = []
+    for issue in (log.get("issues") or [])[:20] if isinstance(log, dict) else []:
+        if isinstance(issue, dict):
+            issues.append({key: str(issue.get(key, ""))[:300] for key in ("severity", "path", "message", "architecture")})
+    return issues
+
+
+def notarize(dmg, keychain, profile, attempts, *, tries=3, delay=60):
+    """Submit and wait; retry only transient failures, recording safe diagnostics."""
+    for attempt in range(1, tries + 1):
+        process = capture("submit DMG for notarization", ["/usr/bin/xcrun", "notarytool", "submit", str(dmg),
+                          "--keychain", str(keychain), "--keychain-profile", profile, "--wait",
+                          "--output-format", "json"], timeout=3600)
+        if process.returncode == 0:
+            try:
+                status = json.loads(text(process.stdout)).get("status")
+            except (ValueError, AttributeError):
+                status = None
+            if status == "Accepted":
+                attempts.append({"attempt": attempt, "status": "Accepted"})
+                return accepted_notarization(process.stdout)
+            failure = notary_failure(process)
+        else:
+            failure = notary_failure(process)
+        failure["attempt"] = attempt
+        if "id" in failure:
+            failure["issues"] = notary_issues(keychain, profile, failure["id"])
+        attempts.append(failure)
+        if not failure["transient"] or attempt == tries:
+            detail = "; ".join(failure["categories"]) if failure["categories"] else failure.get("status", "rejected")
+            if failure.get("status"):
+                detail = "status " + failure["status"] + ("; " + detail if failure["categories"] else "")
+            if failure["http_status"] is not None:
+                detail += "; HTTP " + str(failure["http_status"])
+            raise SigningError("submit DMG for notarization: " + detail + " (attempt " + str(attempt) + ")")
+        time.sleep(delay * attempt)
+    raise SigningError("submit DMG for notarization: retries exhausted")
+
+
 def gatekeeper_assess(path, team, kind, *, classify_non_app=False):
     require(kind in ("dmg", "cli"), "unsupported Gatekeeper assessment kind")
     policy_command = ["/usr/sbin/spctl", "--status"]
@@ -761,10 +854,8 @@ def production(root, tool4d, tag, expected_sha):
             run("store isolated notary profile", ["/usr/bin/xcrun", "notarytool", "store-credentials", profile,
                 "--keychain", str(keychain), "--apple-id", secrets["NOTARYTOOL_APPLE_ID"],
                 "--password", secrets["NOTARYTOOL_PASSWORD"], "--team-id", team], timeout=180)
-            out, _ = run("submit DMG for notarization", ["/usr/bin/xcrun", "notarytool", "submit", str(signed_dmg),
-                "--keychain", str(keychain), "--keychain-profile", profile, "--wait",
-                "--output-format", "json"], timeout=3600)
-            passed(stage, accepted_notarization(out))
+            report["notarization_attempts"] = []
+            passed(stage, notarize(signed_dmg, keychain, profile, report["notarization_attempts"]))
             stage = "dmg_stapling"
             run("staple DMG ticket", ["/usr/bin/xcrun", "stapler", "staple", str(signed_dmg)], timeout=300)
             run("validate stapled DMG ticket", ["/usr/bin/xcrun", "stapler", "validate", str(signed_dmg)], timeout=300)
