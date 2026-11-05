@@ -1,27 +1,14 @@
 name: CI
 on:
   push:
+    branches: ['**']
   pull_request:
-  workflow_dispatch:
-    inputs:
-      accept_4d:
-        description: Run unsigned source/compiler/packed-component tool4d harness with the default pinned runtime
-        type: boolean
-        default: false
   workflow_call:
     inputs:
-      source_sha:
-        description: Exact normalized commit to build
+      ref:
+        description: Exact commit to build (used by Publish)
         type: string
         default: ''
-      source_bundle:
-        description: Same-run artifact containing the exact unpushed version candidate
-        type: string
-        default: ''
-      release_call:
-        description: Release caller performs mandatory 4D acceptance separately
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -36,22 +23,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_bundle && github.sha || inputs.source_sha || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@v4
-        if: inputs.source_bundle != ''
-        with:
-          name: ${{ inputs.source_bundle }}
-          path: build/release-candidate
-      - name: Restore exact unpushed version candidate
-        if: inputs.source_bundle != ''
-        shell: bash
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-        run: python scripts/bump_release.py restore --directory build/release-candidate --expected-sha "$SOURCE_SHA"
       - name: Validate committed icons
         run: python scripts/check_icons.py
       - name: Static and initializer tests (no CLI toolchains)
@@ -76,22 +52,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_bundle && github.sha || inputs.source_sha || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@v4
-        if: inputs.source_bundle != ''
-        with:
-          name: ${{ inputs.source_bundle }}
-          path: build/release-candidate
-      - name: Restore exact unpushed version candidate
-        if: inputs.source_bundle != ''
-        shell: bash
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-        run: python scripts/bump_release.py restore --directory build/release-candidate --expected-sha "$SOURCE_SHA"
       - uses: actions/setup-go@v5
         if: matrix.language == 'go'
         with:
@@ -125,22 +90,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_bundle && github.sha || inputs.source_sha || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@v4
-        if: inputs.source_bundle != ''
-        with:
-          name: ${{ inputs.source_bundle }}
-          path: build/release-candidate
-      - name: Restore exact unpushed version candidate
-        if: inputs.source_bundle != ''
-        shell: bash
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-        run: python scripts/bump_release.py restore --directory build/release-candidate --expected-sha "$SOURCE_SHA"
       - uses: actions/download-artifact@v4
         with:
           name: cli-macos-x64
@@ -163,20 +117,20 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Download pinned free tool4D for optional branch and PR integration tests
-        if: (vars.FOURD_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.accept_4d)) && github.ref_type != 'tag' && !inputs.release_call
+        if: vars.FOURD_ENABLED == 'true' && !inputs.ref
         env:
-          TOOL4D_URL: ${{ !inputs.accept_4d && vars.TOOL4D_URL || '' }}
-          TOOL4D_SHA256: ${{ !inputs.accept_4d && vars.TOOL4D_SHA256 || '' }}
+          TOOL4D_URL: ${{ vars.TOOL4D_URL }}
+          TOOL4D_SHA256: ${{ vars.TOOL4D_SHA256 }}
         run: python scripts/ci_config.py download-tool4d
       - name: Require tool4d source/compiler/exact unpacked compiled-package harness checks
         id: acceptance
-        if: (vars.FOURD_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.accept_4d)) && github.ref_type != 'tag' && !inputs.release_call
+        if: vars.FOURD_ENABLED == 'true' && !inputs.ref
         shell: bash
         run: |
           set -o pipefail
           python scripts/accept_local.py --root . --repository "$GITHUB_REPOSITORY" \
             --tool4d .tools/tool4d.app/Contents/MacOS/tool4d 2>&1 | tee build/4d-acceptance.log
-          python scripts/publish_prerelease.py --write-native-evidence
+          python scripts/publish_release.py --write-native-evidence
       - name: Capture one component-free shutdown probe after acceptance failure
         if: failure() && steps.acceptance.outcome == 'failure'
         shell: python

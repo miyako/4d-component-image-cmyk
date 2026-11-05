@@ -4,7 +4,7 @@
 The original compiler outputs and unsigned evidence are never rewritten. Only
 the two external Mach-O code objects are signed; the nested .4DZ is opaque.
 This script neither publishes assets nor establishes normal 4D app loading.
-Untagged main dispatch preflight is bound to GITHUB_SHA and creates no tag.
+Runs only from the Publish workflow dispatched on main; it creates no tag.
 """
 import argparse
 import base64
@@ -30,7 +30,7 @@ import zipfile
 from build_provenance import commit, sha256, source_digest, verify
 from ci_config import ROOT, TARGETS, load_config, tag_version
 from package_component import validate_compile, write_zip
-from publish_prerelease import presign_assets
+from publish_release import presign_assets, release_version
 
 
 CODE = {"Resources/bin/macOS/image-cmyk": {"arm64", "x86_64"},
@@ -239,52 +239,21 @@ def snapshot_keychain_search_list(root):
     return original
 
 
-def preflight(root, tag, expected_sha, env=None, system=None, candidate=None):
+def preflight(root, tag, expected_sha, env=None, system=None):
     env = os.environ if env is None else env
     require((platform.system() if system is None else system) == "Darwin",
             "production signing requires macOS")
-    from bump_release import release_channel, validate_candidate
     try:
-        release_channel(tag)
+        release_version(tag)
     except ValueError:
-        raise SigningError("normalized SemVer release tag required") from None
+        raise SigningError("bare X.Y.Z release version required") from None
     require(isinstance(expected_sha, str) and re.fullmatch(r"[0-9a-f]{40}", expected_sha),
             "expected full commit SHA required")
     require(commit(root) == expected_sha, "checkout HEAD differs from expected SHA")
     require(env.get("GITHUB_ACTIONS") == "true", "production GitHub Actions required")
     require(env.get("GITHUB_REPOSITORY") == "miyako/CMYK", "production destination must be miyako/CMYK")
-    event = env.get("GITHUB_EVENT_NAME")
-    if event == "push":
-        require(env.get("GITHUB_REF") == "refs/tags/" + tag
-                and env.get("GITHUB_SHA") == expected_sha, "push must identify exact release tag")
-    elif event == "workflow_dispatch":
-        require(env.get("GITHUB_REF") == "refs/heads/main",
-                "manual production dispatch must originate on main")
-    else:
-        raise SigningError("only tag push or main workflow_dispatch is allowed")
-    if candidate is not None:
-        require(event == "workflow_dispatch", "version candidates require main manual dispatch")
-        metadata = validate_candidate(root, candidate, expected_sha, production=True)
-        require(metadata["tag"] == tag, "version candidate differs from signing tag")
-        config = load_config(root, initialized=True, tag=tag, repository=env.get("GITHUB_REPOSITORY"))
-        require(config["repository"] == "CMYK" and config["cli"] == "image-cmyk",
-                "signer is restricted to CMYK")
-        return config
-    tag_ref = "refs/tags/" + tag
-    tag_exists = True
-    if event == "workflow_dispatch":
-        refs, _ = run("inspect optional preflight tag",
-                      ["git", "for-each-ref", "--format=%(refname)", tag_ref], cwd=root)
-        names = text(refs).splitlines()
-        require(not names or names == [tag_ref], "ambiguous preflight tag reference")
-        tag_exists = bool(names)
-        if not tag_exists:
-            require(env.get("GITHUB_SHA") == expected_sha,
-                    "untagged preflight must sign exact dispatched main SHA")
-    if tag_exists:
-        resolved, _ = run("resolve release tag",
-                          ["git", "rev-parse", "--verify", tag_ref + "^{commit}"], cwd=root)
-        require(text(resolved).strip() == expected_sha, "release tag differs from expected SHA")
+    require(env.get("GITHUB_EVENT_NAME") == "workflow_dispatch" and env.get("GITHUB_REF") == "refs/heads/main",
+            "signing only runs from the Publish workflow dispatched on main")
     config = load_config(root, initialized=True, tag=tag, repository=env.get("GITHUB_REPOSITORY"))
     require(config["repository"] == "CMYK" and config["cli"] == "image-cmyk",
             "signer is restricted to CMYK")
@@ -686,7 +655,7 @@ def repack(directory, destination):
     zip_entries(destination.read_bytes(), directory.name)
 
 
-def production(root, tool4d, tag, expected_sha, candidate=None):
+def production(root, tool4d, tag, expected_sha):
     root = Path(root).absolute()
     require(not any(path.is_symlink() for path in (root, *root.parents)), "root symlinks prohibited")
     output = root / "dist/CMYK.signing.json"
@@ -718,7 +687,7 @@ def production(root, tool4d, tag, expected_sha, candidate=None):
 
     save()  # Invalidate any previous success before even preflight.
     try:
-        config = preflight(root, tag, expected_sha, candidate=candidate)
+        config = preflight(root, tag, expected_sha)
         stage = "presign"
         report["presign"] = validate_presign(root, config, expected_sha)
         regular(Path(tool4d))
@@ -914,17 +883,16 @@ def main():
     parser.add_argument("--tool4d", type=Path)
     parser.add_argument("--tag")
     parser.add_argument("--expected-sha")
-    parser.add_argument("--candidate", type=Path, help="verified version-only candidate bundle directory")
     args = parser.parse_args()
     try:
         if args.cleanup:
-            require(args.tool4d is None and args.tag is None and args.expected_sha is None and args.candidate is None,
+            require(args.tool4d is None and args.tag is None and args.expected_sha is None,
                     "--cleanup accepts only --root")
             print(json.dumps({"cleanup": cleanup(args.root)}))
             return
         require(args.tool4d is not None and args.tag is not None and args.expected_sha is not None,
                 "normal signing requires --tool4d, --tag and --expected-sha")
-        report = production(args.root, args.tool4d, args.tag, args.expected_sha, candidate=args.candidate)
+        report = production(args.root, args.tool4d, args.tag, args.expected_sha)
     except (SigningError, OSError, ValueError, TypeError, KeyError) as error:
         parser.exit(1, str(error) + "\n" if isinstance(error, SigningError) else "signing operation failed; diagnostic suppressed\n")
     print(json.dumps({"result": report["result"], "release_ready": False,

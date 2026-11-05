@@ -471,51 +471,31 @@ failed status/phase reports. This is a starter identity/wiring regression,
 **not** evidence that UUIDv7 or any other new feature was implemented.
 
 `--tag` validates package/version identity; it does not create/push/publish a tag.
-For approved hosted publication only, set Actions **variable**
-`FOURD_ENABLED=true`; `TOOL4D_URL` / `TOOL4D_SHA256` are optional paired overrides
-of the approved public `package.json.tool` pin, not required secrets. Push the matching
-bare `<version>` tag (e.g. `0.1.2`, no `v` prefix). Release jobs build same-tag native resources, compile after
-assembly and host-test the unpacked package before publishing `<repository>.zip`.
-Only publication receives built-in `GITHUB_TOKEN` write permission; no personal
-token/version-bot commit is required.
+Set Actions **variable** `FOURD_ENABLED=true` to run the hosted 4D acceptance in
+CI; `TOOL4D_URL` / `TOOL4D_SHA256` are optional paired overrides of the approved
+public `package.json.tool` pin, not required secrets.
 
-### Manual Actions dispatch and existing-tag release
+### Publishing: Actions → Publish → Run workflow
 
-After the dispatch-capable workflow is merged to the **default branch**, open
-**Actions → CI → Run workflow** and select a branch for ordinary validation.
-`FOURD_ENABLED` still controls optional hosted 4D steps; CLI-only green is not
-compiled-host green.
+The repository has exactly two workflows: **CI** (push/pull request validation,
+also reused by Publish via `workflow_call`) and **Publish**, the only release
+workflow. Open **Actions → Publish → Run workflow** on `main` and choose
+`patch`, `minor` or `major` (`gh workflow run publish.yml --ref main -f mode=patch`).
+There are no tag-push triggers, version-tag, dry-run, preflight or promote inputs.
 
-**Actions → Release compiled component → Run workflow**, with `preflight:true`,
-builds/signs/notarizes reviewed current `main` without creating tags or publishing.
-Run this before pushing a new release tag. The six signing credentials below are
-available only to production release signing, never PR CI.
-
-Ordinary publication requires `version_tag`, an **already existing**
-bare `<SemVer>` tag (e.g. `0.1.2`; legacy `v0.1.1`-and-earlier tags remain
-resolvable) matching the initialized
-repository's `template.json.version` / `package.json.version`. It creates no
-tag. The gate resolves/peels that tag to a commit SHA, validates source at that
-SHA, and all reusable native CI, assembly, compilation and publication jobs use
-that exact SHA—not the selected UI branch. Packaging receives the normalized
-tag explicitly. Publication refreshes and verifies the tag has not moved, uses
-`--verify-tag`, and remains blocked by compilation or final host failure.
-Do not manually dispatch publication or create a tag without user permission.
-The new workflow is not available in the default template before its PR merges.
-
-For this adopted repository, **Actions → Bump and release** additionally offers
-`major`, `minor`, `patch` and `promote`, with dry run enabled by default.
-`package.json.version` is authoritative; component metadata, host assertions and
-the current class version example must remain synchronized. A disposable,
-deterministic version-only commit is bundled without pushing it, built on all
-three native targets and checked by the pinned tool4d/compiler/package pipeline.
-Dry run uses no signing secrets, remote version/tag writes or publication.
-Production requires explicit user-authorized dispatch on `main` with dry run
-disabled; only after all signed-distribution gates pass may main/tag be pushed
-atomically and the verified assets published. No force/protection bypass is
-permitted. Stable tags publish as stable/Latest; real SemVer prereleases do not.
-See README for numeric bump and RC promotion rules. Preflight cannot reuse a tag
-already bound to different source; use a bump dry run instead, never retag.
+Publish computes the next version from the latest **stable** SemVer tag (legacy
+`v`-prefixed tags are read, prerelease tags ignored; with no tag it bumps
+`package.json.version`) using `scripts/bump_release.py next`, writes it with
+`scripts/bump_release.py apply` (`package.json`, `template.json`, host contract
+version assertions, class documentation example) and commits `Release X.Y.Z` to
+`main`. That exact commit is built by CI's native matrix, accepted by
+`scripts/accept_local.py` (tool4d harness, compiler, package, compiled harness),
+codesigned/notarized by `scripts/sign_release.py` and published by
+`scripts/publish_release.py`, which creates the bare tag `X.Y.Z` (never
+`v`-prefixed) and a Latest GitHub release named `X.Y.Z` with the signed ZIP/DMG
+and evidence JSON. It never reuses an existing tag/release or force-pushes; a
+failed run is retried by running Publish again with the same mode.
+Do not run Publish, or create/move tags or releases, without user permission.
 
 ## 7. Report evidence, not assumptions
 
@@ -656,9 +636,8 @@ container/Apple `Contents/` layout requires deliberate packaging changes.
 
 ### Six Apple secrets: production signing only
 
-The adopted CMYK release and bump entrypoints share
-`.github/workflows/release-build.yml`, which invokes `scripts/sign_release.py`
-with these six secrets on production events only, never a dry run. Every signature, notarization
+The CMYK **Publish** workflow (`.github/workflows/publish.yml`) invokes
+`scripts/sign_release.py` with these six secrets; CI never receives them. Every signature, notarization
 `Accepted`, DMG staple/Gatekeeper and final-payload check is fail-closed.
 Registration alone does not establish signing success. No secret below is
 required by the free local compiler, PR CI or unsigned local acceptance.

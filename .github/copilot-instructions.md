@@ -15,4 +15,6 @@ Require same-revision binaries, actual source host tests, real compilation and
 host tests against the unpacked source-stripped compiled ZIP. Report `not_run`
 separately from `passed`; partial local acceptance is NOT release ready.
 Follow AGENTS.md for fixed free tool4d, licensing, packaging and optional signing.
+Releases use only Actions → Publish → Run workflow → choose patch/minor/major;
+never run it or create tags/releases without user permission.
 Unsigned local acceptance needs no license activation or signing secrets.
