@@ -82,10 +82,10 @@
         {"path": "/exitCode", "absent": true}
       ]},
       {"path": "/version/ok", "equals": true},
-      {"path": "/version/stdout", "equals": "{\"protocol\":1,\"version\":\"0.1.1\"}\n"},
+      {"path": "/version/stdout", "equals": "{\"protocol\":1,\"version\":\"0.1.2\"}\n"},
       {"path": "/version/stderr", "equals": ""},
       {"path": "/version/exitCode", "equals": 0},
-      {"path": "/version/value", "equals": {"protocol": 1, "version": "0.1.1"}},
+      {"path": "/version/value", "equals": {"protocol": 1, "version": "0.1.2"}},
       {"path": "/protocol/ok", "equals": false},
       {"path": "/protocol/stdout", "equals": "not json"},
       {"path": "/protocol/stderr", "equals": ""},
@@ -133,7 +133,7 @@
   "execution": {
     "successPaths": ["/fileArgument", "/renamedExecutable", "/renamedInspect"],
     "assertions": [
-      {"path": "/renamedExecutable", "equals": {"ok": true, "stdout": "{\"protocol\":1,\"version\":\"0.1.1\"}\n", "stderr": "", "exitCode": 0}},
+      {"path": "/renamedExecutable", "equals": {"ok": true, "stdout": "{\"protocol\":1,\"version\":\"0.1.2\"}\n", "stderr": "", "exitCode": 0}},
       {"path": "/fileArgument/stdout", "matches": "\\{[^\\n]*\"colorSpace\":\"RGB\"[^\\n]*\\}\\n"},
       {"path": "/renamedInspect/stdout", "matches": "\\{[^\\n]*\"colorSpace\":\"RGB\"[^\\n]*\\}\\n"},
       {"path": "/folderArgument/ok", "equals": false},
