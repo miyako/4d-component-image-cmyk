@@ -52,8 +52,8 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: python scripts/bump_release.py restore --directory build/release-candidate --expected-sha "$SOURCE_SHA"
-      - name: Check generated reference icons
-        run: python scripts/generate_icons.py --check
+      - name: Validate committed icons
+        run: python scripts/check_icons.py
       - name: Static and initializer tests (no CLI toolchains)
         env:
           TEST_CLI_LANGUAGE: none

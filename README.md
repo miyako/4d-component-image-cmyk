@@ -203,7 +203,7 @@ python3 scripts/doctor.py --root .
 python3 scripts/build_cli.py --root . --target macos-arm64
 python3 -m unittest discover -s tests -p test_cli.py -v
 python3 -m unittest discover -s tests -v
-python3 scripts/generate_icons.py --check
+python3 scripts/check_icons.py
 ```
 
 Choose the **native** target: `macos-arm64`, `macos-x64` or `windows-x64`.
