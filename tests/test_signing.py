@@ -130,6 +130,62 @@ class PolicyTests(Fixture):
                 signing.accepted_notarization(json.dumps(value).encode())
 
 
+class NotarizeTests(Fixture):
+    def submit(self, outputs):
+        attempts = []
+        processes = [subprocess.CompletedProcess([], code, stdout, stderr) for code, stdout, stderr in outputs]
+        with patch.object(signing, "capture", side_effect=processes) as capture, \
+                patch.object(signing.time, "sleep") as sleep:
+            try:
+                result = signing.notarize(self.root / "CMYK.dmg", self.root / "k", "profile", attempts)
+            except signing.SigningError as error:
+                result = error
+        return result, attempts, capture, sleep
+
+    def test_accepted_first_try(self):
+        identifier = str(uuid.uuid4())
+        accepted = json.dumps({"status": "Accepted", "id": identifier}).encode()
+        result, attempts, capture, sleep = self.submit([(0, accepted, b"")])
+        self.assertEqual(result, {"status": "Accepted", "id": identifier})
+        self.assertEqual(capture.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_transient_failures_are_retried(self):
+        identifier = str(uuid.uuid4())
+        accepted = json.dumps({"status": "Accepted", "id": identifier}).encode()
+        result, attempts, capture, sleep = self.submit([
+            (1, b"", b"Error: HTTP status code: 503. Service Unavailable"),
+            (1, b"", b"Error: The network connection was lost."),
+            (0, accepted, b"")])
+        self.assertEqual(result["id"], identifier)
+        self.assertEqual([item.get("http_status") for item in attempts[:2]], [503, None])
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_agreement_failure_is_reported_without_retry_or_secrets(self):
+        stderr = (b"Error: HTTP status code: 403. A required agreement is missing or has expired. "
+                  b"user@example.com SECRET-password")
+        result, attempts, capture, sleep = self.submit([(1, b"", stderr)])
+        self.assertIsInstance(result, signing.SigningError)
+        self.assertIn("agreement", str(result))
+        self.assertIn("HTTP 403", str(result))
+        self.assertEqual(capture.call_count, 1)
+        serialized = json.dumps(attempts) + str(result)
+        self.assertNotIn("SECRET", serialized)
+        self.assertNotIn("user@example.com", serialized)
+
+    def test_invalid_submission_records_log_issues(self):
+        identifier = str(uuid.uuid4())
+        invalid = json.dumps({"status": "Invalid", "id": identifier, "message": "Processing complete"}).encode()
+        log = json.dumps({"issues": [{"severity": "error", "path": "CMYK.dmg/x", "message": "not signed",
+                                      "architecture": "arm64"}]}).encode()
+        result, attempts, capture, sleep = self.submit([(1, invalid, b""), (0, log, b"")])
+        self.assertIsInstance(result, signing.SigningError)
+        self.assertIn("status Invalid", str(result))
+        self.assertEqual(attempts[0]["id"], identifier)
+        self.assertEqual(attempts[0]["issues"][0]["message"], "not signed")
+        sleep.assert_not_called()
+
+
 class PayloadTests(Fixture):
     def test_inventory_sorted_posix_and_nested_archive_preserved(self):
         archive = self.archive()
